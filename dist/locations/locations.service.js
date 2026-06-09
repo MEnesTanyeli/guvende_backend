@@ -182,6 +182,23 @@ let LocationsService = class LocationsService {
         if (!isMember) {
             throw new common_1.ForbiddenException('Bu aile grubunun konum verilerine erişim yetkiniz yok.');
         }
+        if (isMember.memberType !== client_1.MemberType.guardian) {
+            const myLocation = await this.prisma.location.findFirst({
+                where: { userId },
+                orderBy: { recordedAt: 'desc' },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            name: true,
+                            email: true,
+                            phone: true,
+                        },
+                    },
+                },
+            });
+            return myLocation ? [myLocation] : [];
+        }
         const members = await this.prisma.familyMember.findMany({
             where: { familyId },
             select: { userId: true },

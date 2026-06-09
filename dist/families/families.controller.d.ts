@@ -5,24 +5,24 @@ export declare class FamiliesController {
     private familiesService;
     constructor(familiesService: FamiliesService);
     create(userId: string, dto: CreateFamilyDto): Promise<{
-        name: string;
         id: string;
+        name: string;
         createdAt: Date;
         updatedAt: Date;
         ownerId: string;
     }>;
     findAll(userId: string): Promise<({
+        owner: {
+            id: string;
+            name: string;
+            email: string;
+        };
         _count: {
             members: number;
         };
-        owner: {
-            email: string;
-            name: string;
-            id: string;
-        };
     } & {
-        name: string;
         id: string;
+        name: string;
         createdAt: Date;
         updatedAt: Date;
         ownerId: string;
@@ -34,35 +34,52 @@ export declare class FamiliesController {
     } & {
         id: string;
         createdAt: Date;
+        userId: string;
         familyId: string;
         memberType: import(".prisma/client").$Enums.MemberType;
+        permissions: string[];
+    }>;
+    updateMemberRole(userId: string, familyId: string, body: {
+        targetUserId: string;
+        memberType: string;
+    }): Promise<{
+        user: {
+            id: string;
+            name: string;
+            email: string;
+        };
+    } & {
+        id: string;
+        createdAt: Date;
         userId: string;
+        familyId: string;
+        memberType: import(".prisma/client").$Enums.MemberType;
         permissions: string[];
     }>;
     findOne(userId: string, id: string): Promise<{
         owner: {
-            email: string;
-            name: string;
             id: string;
+            name: string;
+            email: string;
         };
         members: ({
             user: {
-                email: string;
-                name: string;
-                phone: string | null;
                 id: string;
+                name: string;
+                email: string;
+                phone: string | null;
             };
         } & {
             id: string;
             createdAt: Date;
+            userId: string;
             familyId: string;
             memberType: import(".prisma/client").$Enums.MemberType;
-            userId: string;
             permissions: string[];
         })[];
         safeZones: {
-            name: string;
             id: string;
+            name: string;
             createdAt: Date;
             familyId: string;
             latitude: number;
@@ -71,8 +88,8 @@ export declare class FamiliesController {
             createdBy: string;
         }[];
     } & {
-        name: string;
         id: string;
+        name: string;
         createdAt: Date;
         updatedAt: Date;
         ownerId: string;

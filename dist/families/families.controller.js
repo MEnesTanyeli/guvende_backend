@@ -33,6 +33,9 @@ let FamiliesController = class FamiliesController {
     async join(userId, dto) {
         return this.familiesService.join(userId, dto);
     }
+    async updateMemberRole(userId, familyId, body) {
+        return this.familiesService.updateMemberRole(userId, familyId, body.targetUserId, body.memberType);
+    }
     async findOne(userId, id) {
         return this.familiesService.findOne(userId, id);
     }
@@ -64,6 +67,15 @@ __decorate([
     __metadata("design:paramtypes", [String, join_family_dto_1.JoinFamilyDto]),
     __metadata("design:returntype", Promise)
 ], FamiliesController.prototype, "join", null);
+__decorate([
+    (0, common_1.Patch)(':id/members/role'),
+    __param(0, (0, get_user_decorator_1.GetUser)('id')),
+    __param(1, (0, common_1.Param)('id')),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, Object]),
+    __metadata("design:returntype", Promise)
+], FamiliesController.prototype, "updateMemberRole", null);
 __decorate([
     (0, common_1.Get)(':id'),
     __param(0, (0, get_user_decorator_1.GetUser)('id')),

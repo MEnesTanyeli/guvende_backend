@@ -10,13 +10,12 @@ export declare class LocationsService {
     private getDistanceInMeters;
     recordLocation(userId: string, dto: RecordLocationDto): Promise<{
         user: {
-            email: string;
-            name: string;
             id: string;
+            name: string;
+            email: string;
         };
     } & {
         id: string;
-        userId: string;
         latitude: number;
         longitude: number;
         accuracy: number | null;
@@ -25,17 +24,17 @@ export declare class LocationsService {
         isCharging: boolean | null;
         connectionStatus: string;
         recordedAt: Date;
+        userId: string;
     }>;
     getLatestLocations(userId: string, familyId: string): Promise<({
         user: {
-            email: string;
-            name: string;
-            phone: string | null;
             id: string;
+            name: string;
+            email: string;
+            phone: string | null;
         };
     } & {
         id: string;
-        userId: string;
         latitude: number;
         longitude: number;
         accuracy: number | null;
@@ -44,5 +43,6 @@ export declare class LocationsService {
         isCharging: boolean | null;
         connectionStatus: string;
         recordedAt: Date;
+        userId: string;
     })[]>;
 }

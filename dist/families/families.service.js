@@ -157,6 +157,62 @@ let FamiliesService = class FamiliesService {
             },
         });
     }
+    async updateMemberRole(userId, familyId, targetUserId, newRole) {
+        const editorMembership = await this.prisma.familyMember.findUnique({
+            where: {
+                familyId_userId: {
+                    familyId,
+                    userId,
+                },
+            },
+        });
+        if (!editorMembership) {
+            throw new common_1.ForbiddenException('Bu aile grubuna üye değilsiniz.');
+        }
+        if (editorMembership.memberType !== client_1.MemberType.guardian) {
+            throw new common_1.ForbiddenException('Sadece koruyucu (guardian) üyeler başkalarının rollerini değiştirebilir.');
+        }
+        const targetMembership = await this.prisma.familyMember.findUnique({
+            where: {
+                familyId_userId: {
+                    familyId,
+                    userId: targetUserId,
+                },
+            },
+        });
+        if (!targetMembership) {
+            throw new common_1.NotFoundException('Güncellenmek istenen aile üyesi grupta bulunamadı.');
+        }
+        const family = await this.prisma.family.findUnique({
+            where: { id: familyId }
+        });
+        if (family && family.ownerId === targetUserId) {
+            throw new common_1.ForbiddenException('Grup sahibinin rolü değiştirilemez.');
+        }
+        if (!Object.values(client_1.MemberType).includes(newRole)) {
+            throw new common_1.ConflictException('Geçersiz üye tipi.');
+        }
+        return this.prisma.familyMember.update({
+            where: {
+                familyId_userId: {
+                    familyId,
+                    userId: targetUserId,
+                },
+            },
+            data: {
+                memberType: newRole,
+            },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        name: true,
+                        email: true,
+                    }
+                }
+            }
+        });
+    }
 };
 exports.FamiliesService = FamiliesService;
 exports.FamiliesService = FamiliesService = __decorate([

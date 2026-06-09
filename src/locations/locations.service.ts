@@ -2,7 +2,7 @@ import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/commo
 import { PrismaService } from '../prisma/prisma.service';
 import { RecordLocationDto } from './dto/record-location.dto';
 import { LocationsGateway } from './locations.gateway';
-import { AlertType, AlertStatus } from '@prisma/client';
+import { AlertType, AlertStatus, MemberType } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
@@ -239,6 +239,25 @@ export class LocationsService {
 
     if (!isMember) {
       throw new ForbiddenException('Bu aile grubunun konum verilerine erişim yetkiniz yok.');
+    }
+
+    // Eğer istek atan üye guardian (veli) değilse, diğerlerinin konumuna erişemez, sadece kendi konumunu görebilir.
+    if (isMember.memberType !== MemberType.guardian) {
+      const myLocation = await this.prisma.location.findFirst({
+        where: { userId },
+        orderBy: { recordedAt: 'desc' },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              phone: true,
+            },
+          },
+        },
+      });
+      return myLocation ? [myLocation] : [];
     }
 
     // Ailedeki tüm üyeleri çek

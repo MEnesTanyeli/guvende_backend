@@ -168,4 +168,73 @@ export class FamiliesService {
       },
     });
   }
+
+  async updateMemberRole(userId: string, familyId: string, targetUserId: string, newRole: string) {
+    // 1. Yetki Kontrolü: İstek yapan kişi bu aile grubunda "guardian" (veli) mi?
+    const editorMembership = await this.prisma.familyMember.findUnique({
+      where: {
+        familyId_userId: {
+          familyId,
+          userId,
+        },
+      },
+    });
+
+    if (!editorMembership) {
+      throw new ForbiddenException('Bu aile grubuna üye değilsiniz.');
+    }
+
+    if (editorMembership.memberType !== MemberType.guardian) {
+      throw new ForbiddenException('Sadece koruyucu (guardian) üyeler başkalarının rollerini değiştirebilir.');
+    }
+
+    // 2. Güncelleme yapılacak üyenin varlığını kontrol et
+    const targetMembership = await this.prisma.familyMember.findUnique({
+      where: {
+        familyId_userId: {
+          familyId,
+          userId: targetUserId,
+        },
+      },
+    });
+
+    if (!targetMembership) {
+      throw new NotFoundException('Güncellenmek istenen aile üyesi grupta bulunamadı.');
+    }
+
+    // Aile sahibinin (owner) rolünü değiştirmeyi engelleyelim (veya grup kurucusunu)
+    const family = await this.prisma.family.findUnique({
+      where: { id: familyId }
+    });
+    if (family && family.ownerId === targetUserId) {
+      throw new ForbiddenException('Grup sahibinin rolü değiştirilemez.');
+    }
+
+    // 3. Rolü güncelle
+    if (!Object.values(MemberType).includes(newRole as MemberType)) {
+      throw new ConflictException('Geçersiz üye tipi.');
+    }
+
+    return this.prisma.familyMember.update({
+      where: {
+        familyId_userId: {
+          familyId,
+          userId: targetUserId,
+        },
+      },
+      data: {
+        memberType: newRole as MemberType,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          }
+        }
+      }
+    });
+  }
 }
+

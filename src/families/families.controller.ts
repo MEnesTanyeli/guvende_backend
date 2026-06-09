@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { FamiliesService } from './families.service';
 import { CreateFamilyDto } from './dto/create-family.dto';
 import { JoinFamilyDto } from './dto/join-family.dto';
@@ -25,6 +25,15 @@ export class FamiliesController {
     return this.familiesService.join(userId, dto);
   }
 
+  @Patch(':id/members/role')
+  async updateMemberRole(
+    @GetUser('id') userId: string,
+    @Param('id') familyId: string,
+    @Body() body: { targetUserId: string; memberType: string },
+  ) {
+    return this.familiesService.updateMemberRole(userId, familyId, body.targetUserId, body.memberType);
+  }
+
   @Get(':id')
   async findOne(@GetUser('id') userId: string, @Param('id') id: string) {
     return this.familiesService.findOne(userId, id);
@@ -35,3 +44,4 @@ export class FamiliesController {
     return this.familiesService.invite(userId, id);
   }
 }
+
