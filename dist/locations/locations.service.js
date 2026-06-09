@@ -1,0 +1,216 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.LocationsService = void 0;
+const common_1 = require("@nestjs/common");
+const prisma_service_1 = require("../prisma/prisma.service");
+const locations_gateway_1 = require("./locations.gateway");
+const client_1 = require("@prisma/client");
+const notifications_service_1 = require("../notifications/notifications.service");
+let LocationsService = class LocationsService {
+    prisma;
+    locationsGateway;
+    notificationsService;
+    constructor(prisma, locationsGateway, notificationsService) {
+        this.prisma = prisma;
+        this.locationsGateway = locationsGateway;
+        this.notificationsService = notificationsService;
+    }
+    getDistanceInMeters(lat1, lon1, lat2, lon2) {
+        const R = 6371000;
+        const dLat = (lat2 - lat1) * (Math.PI / 180);
+        const dLon = (lon2 - lon1) * (Math.PI / 180);
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * (Math.PI / 180)) *
+                Math.cos(lat2 * (Math.PI / 180)) *
+                Math.sin(dLon / 2) *
+                Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
+    }
+    async recordLocation(userId, dto) {
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: { name: true },
+        });
+        if (!user) {
+            throw new common_1.NotFoundException('Kullanıcı bulunamadı.');
+        }
+        const prevLocation = await this.prisma.location.findFirst({
+            where: { userId },
+            orderBy: { recordedAt: 'desc' },
+        });
+        const newLocation = await this.prisma.location.create({
+            data: {
+                userId,
+                latitude: dto.latitude,
+                longitude: dto.longitude,
+                accuracy: dto.accuracy,
+                speed: dto.speed,
+                batteryLevel: dto.batteryLevel,
+                isCharging: dto.isCharging ?? false,
+                connectionStatus: 'online',
+            },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        name: true,
+                        email: true,
+                    },
+                },
+            },
+        });
+        await this.prisma.alert.updateMany({
+            where: {
+                userId,
+                type: client_1.AlertType.connection_lost,
+                status: client_1.AlertStatus.active,
+            },
+            data: {
+                status: client_1.AlertStatus.resolved,
+                resolvedAt: new Date(),
+            },
+        });
+        const memberships = await this.prisma.familyMember.findMany({
+            where: { userId },
+            select: { familyId: true },
+        });
+        for (const membership of memberships) {
+            const familyId = membership.familyId;
+            const safeZones = await this.prisma.safeZone.findMany({
+                where: { familyId },
+            });
+            for (const zone of safeZones) {
+                const newDist = this.getDistanceInMeters(dto.latitude, dto.longitude, zone.latitude, zone.longitude);
+                if (prevLocation) {
+                    const prevDist = this.getDistanceInMeters(prevLocation.latitude, prevLocation.longitude, zone.latitude, zone.longitude);
+                    if (newDist <= zone.radius && prevDist > zone.radius) {
+                        const alertTitle = 'Güvenli Bölgeye Giriş';
+                        const alertMsg = `${user.name}, "${zone.name}" güvenli bölgesine giriş yaptı.`;
+                        await this.prisma.alert.create({
+                            data: {
+                                familyId,
+                                userId,
+                                type: client_1.AlertType.safe_zone_enter,
+                                title: alertTitle,
+                                message: alertMsg,
+                                metadata: { safeZoneId: zone.id, safeZoneName: zone.name },
+                            },
+                        });
+                        await this.notificationsService.sendFamilyNotification(familyId, userId, alertTitle, alertMsg, { type: 'safe_zone_enter', userId, zoneId: zone.id });
+                    }
+                    if (newDist > zone.radius && prevDist <= zone.radius) {
+                        const alertTitle = 'Güvenli Bölgeden Çıkış';
+                        const alertMsg = `${user.name}, "${zone.name}" güvenli bölgesinden çıkış yaptı!`;
+                        await this.prisma.alert.create({
+                            data: {
+                                familyId,
+                                userId,
+                                type: client_1.AlertType.safe_zone_exit,
+                                title: alertTitle,
+                                message: alertMsg,
+                                metadata: { safeZoneId: zone.id, safeZoneName: zone.name },
+                            },
+                        });
+                        await this.notificationsService.sendFamilyNotification(familyId, userId, alertTitle, alertMsg, { type: 'safe_zone_exit', userId, zoneId: zone.id });
+                    }
+                }
+            }
+            this.locationsGateway.sendLocationUpdate(familyId, newLocation);
+        }
+        if (dto.batteryLevel !== undefined) {
+            if (dto.batteryLevel <= 15 && !dto.isCharging) {
+                const activeBatteryAlert = await this.prisma.alert.findFirst({
+                    where: {
+                        userId,
+                        type: client_1.AlertType.low_battery,
+                        status: client_1.AlertStatus.active,
+                    },
+                });
+                if (!activeBatteryAlert) {
+                    const alertTitle = 'Düşük Şarj Uyarısı';
+                    const alertMsg = `${user.name} adlı aile üyesinin şarjı %${dto.batteryLevel} seviyesine düştü!`;
+                    for (const membership of memberships) {
+                        await this.prisma.alert.create({
+                            data: {
+                                familyId: membership.familyId,
+                                userId,
+                                type: client_1.AlertType.low_battery,
+                                title: alertTitle,
+                                message: alertMsg,
+                                metadata: { batteryLevel: dto.batteryLevel },
+                            },
+                        });
+                        await this.notificationsService.sendFamilyNotification(membership.familyId, userId, alertTitle, alertMsg, { type: 'low_battery', userId, batteryLevel: dto.batteryLevel });
+                    }
+                }
+            }
+            else if (dto.batteryLevel > 15 || dto.isCharging) {
+                await this.prisma.alert.updateMany({
+                    where: {
+                        userId,
+                        type: client_1.AlertType.low_battery,
+                        status: client_1.AlertStatus.active,
+                    },
+                    data: {
+                        status: client_1.AlertStatus.resolved,
+                        resolvedAt: new Date(),
+                    },
+                });
+            }
+        }
+        return newLocation;
+    }
+    async getLatestLocations(userId, familyId) {
+        const isMember = await this.prisma.familyMember.findUnique({
+            where: {
+                familyId_userId: {
+                    familyId,
+                    userId,
+                },
+            },
+        });
+        if (!isMember) {
+            throw new common_1.ForbiddenException('Bu aile grubunun konum verilerine erişim yetkiniz yok.');
+        }
+        const members = await this.prisma.familyMember.findMany({
+            where: { familyId },
+            select: { userId: true },
+        });
+        const userIds = members.map((m) => m.userId);
+        const latestLocations = await Promise.all(userIds.map(async (uid) => {
+            return this.prisma.location.findFirst({
+                where: { userId: uid },
+                orderBy: { recordedAt: 'desc' },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            name: true,
+                            email: true,
+                            phone: true,
+                        },
+                    },
+                },
+            });
+        }));
+        return latestLocations.filter((loc) => loc !== null);
+    }
+};
+exports.LocationsService = LocationsService;
+exports.LocationsService = LocationsService = __decorate([
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        locations_gateway_1.LocationsGateway,
+        notifications_service_1.NotificationsService])
+], LocationsService);
+//# sourceMappingURL=locations.service.js.map

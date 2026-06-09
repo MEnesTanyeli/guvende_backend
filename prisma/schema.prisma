@@ -1,0 +1,153 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum MemberType {
+  guardian
+  child
+  elder
+}
+
+enum AlertType {
+  low_battery
+  connection_lost
+  safe_zone_enter
+  safe_zone_exit
+  inactivity
+  sos
+}
+
+enum AlertStatus {
+  active
+  resolved
+}
+
+model User {
+  id                String             @id @default(uuid())
+  name              String
+  email             String             @unique
+  phone             String?
+  passwordHash      String
+  role              String             @default("user")
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  familiesOwned     Family[]           @relation("FamilyOwner")
+  memberships       FamilyMember[]
+  locations         Location[]
+  alerts            Alert[]
+  sosEvents         SosEvent[]
+  activitySnapshots ActivitySnapshot[]
+
+  @@map("users")
+}
+
+model Family {
+  id          String         @id @default(uuid())
+  name        String
+  ownerId     String
+  owner       User           @relation("FamilyOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members     FamilyMember[]
+  safeZones   SafeZone[]
+  alerts      Alert[]
+  sosEvents   SosEvent[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@map("families")
+}
+
+model FamilyMember {
+  id          String     @id @default(uuid())
+  familyId    String
+  family      Family     @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  memberType  MemberType @default(child)
+  permissions String[]   @default([])
+  createdAt   DateTime   @default(now())
+
+  @@unique([familyId, userId])
+  @@map("family_members")
+}
+
+model Location {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  latitude         Float
+  longitude        Float
+  accuracy         Float?
+  speed            Float?
+  batteryLevel     Int?
+  isCharging       Boolean? @default(false)
+  connectionStatus String   @default("online")
+  recordedAt       DateTime @default(now())
+
+  @@index([userId, recordedAt(sort: Desc)])
+  @@map("locations")
+}
+
+model SafeZone {
+  id        String   @id @default(uuid())
+  familyId  String
+  family    Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  name      String
+  latitude  Float
+  longitude Float
+  radius    Float    // metre cinsinden
+  createdBy String
+  createdAt DateTime @default(now())
+
+  @@map("safe_zones")
+}
+
+model Alert {
+  id         String      @id @default(uuid())
+  familyId   String
+  family     Family      @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type       AlertType
+  title      String
+  message    String
+  status     AlertStatus @default(active)
+  metadata   Json?
+  createdAt  DateTime    @default(now())
+  resolvedAt DateTime?
+
+  @@index([familyId, status])
+  @@map("alerts")
+}
+
+model SosEvent {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  familyId  String
+  family     Family      @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  latitude  Float
+  longitude Float
+  message   String?
+  createdAt DateTime @default(now())
+
+  @@map("sos_events")
+}
+
+model ActivitySnapshot {
+  id                 String   @id @default(uuid())
+  userId             String
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date               DateTime
+  totalDistance      Float    @default(0)
+  activeMinutes      Int      @default(0)
+  visitedPlacesCount Int      @default(0)
+  createdAt          DateTime @default(now())
+
+  @@unique([userId, date])
+  @@map("activity_snapshots")
+}
