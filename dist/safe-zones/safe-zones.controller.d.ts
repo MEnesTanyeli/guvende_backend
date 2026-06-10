@@ -4,8 +4,8 @@ export declare class SafeZonesController {
     private safeZonesService;
     constructor(safeZonesService: SafeZonesService);
     create(userId: string, familyId: string, dto: CreateSafeZoneDto): Promise<{
-        name: string;
         id: string;
+        name: string;
         createdAt: Date;
         familyId: string;
         latitude: number;
@@ -14,8 +14,8 @@ export declare class SafeZonesController {
         createdBy: string;
     }>;
     findAll(userId: string, familyId: string): Promise<{
-        name: string;
         id: string;
+        name: string;
         createdAt: Date;
         familyId: string;
         latitude: number;

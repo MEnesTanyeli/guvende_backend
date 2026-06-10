@@ -20,6 +20,7 @@ enum AlertType {
   safe_zone_exit
   inactivity
   sos
+  family_leave
 }
 
 enum AlertStatus {

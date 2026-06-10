@@ -6,11 +6,12 @@ export declare class LocationsController {
     recordLocation(userId: string, dto: RecordLocationDto): Promise<{
         user: {
             id: string;
-            name: string;
             email: string;
+            name: string;
         };
     } & {
         id: string;
+        userId: string;
         latitude: number;
         longitude: number;
         accuracy: number | null;
@@ -19,17 +20,17 @@ export declare class LocationsController {
         isCharging: boolean | null;
         connectionStatus: string;
         recordedAt: Date;
-        userId: string;
     }>;
-    getLatestLocations(userId: string, familyId: string): Promise<({
+    getLatestLocations(userId: string, familyId: string): Promise<{
+        insideZoneName: string | null;
         user: {
             id: string;
-            name: string;
             email: string;
+            name: string;
             phone: string | null;
         };
-    } & {
         id: string;
+        userId: string;
         latitude: number;
         longitude: number;
         accuracy: number | null;
@@ -38,6 +39,13 @@ export declare class LocationsController {
         isCharging: boolean | null;
         connectionStatus: string;
         recordedAt: Date;
-        userId: string;
-    })[]>;
+    }[]>;
+    getLocationsHistory(userId: string, familyId: string, targetUserId: string, dateStr?: string): Promise<{
+        id: string;
+        latitude: number;
+        longitude: number;
+        speed: number | null;
+        batteryLevel: number | null;
+        recordedAt: Date;
+    }[]>;
 }

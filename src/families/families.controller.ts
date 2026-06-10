@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { FamiliesService } from './families.service';
 import { CreateFamilyDto } from './dto/create-family.dto';
 import { JoinFamilyDto } from './dto/join-family.dto';
@@ -42,6 +42,25 @@ export class FamiliesController {
   @Post(':id/invite')
   async invite(@GetUser('id') userId: string, @Param('id') id: string) {
     return this.familiesService.invite(userId, id);
+  }
+
+  @Delete(':id/leave')
+  async leave(@GetUser('id') userId: string, @Param('id') id: string) {
+    return this.familiesService.leave(userId, id);
+  }
+
+  @Delete(':id/members/:targetUserId')
+  async removeMember(
+    @GetUser('id') userId: string,
+    @Param('id') id: string,
+    @Param('targetUserId') targetUserId: string,
+  ) {
+    return this.familiesService.removeMember(userId, id, targetUserId);
+  }
+
+  @Delete(':id')
+  async deleteFamily(@GetUser('id') userId: string, @Param('id') id: string) {
+    return this.familiesService.deleteFamily(userId, id);
   }
 }
 

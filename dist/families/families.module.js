@@ -10,11 +10,13 @@ exports.FamiliesModule = void 0;
 const common_1 = require("@nestjs/common");
 const families_service_1 = require("./families.service");
 const families_controller_1 = require("./families.controller");
+const notifications_module_1 = require("../notifications/notifications.module");
 let FamiliesModule = class FamiliesModule {
 };
 exports.FamiliesModule = FamiliesModule;
 exports.FamiliesModule = FamiliesModule = __decorate([
     (0, common_1.Module)({
+        imports: [notifications_module_1.NotificationsModule],
         providers: [families_service_1.FamiliesService],
         controllers: [families_controller_1.FamiliesController],
         exports: [families_service_1.FamiliesService],

@@ -29,6 +29,9 @@ let LocationsController = class LocationsController {
     async getLatestLocations(userId, familyId) {
         return this.locationsService.getLatestLocations(userId, familyId);
     }
+    async getLocationsHistory(userId, familyId, targetUserId, dateStr) {
+        return this.locationsService.getLocationsHistory(userId, familyId, targetUserId, dateStr);
+    }
 };
 exports.LocationsController = LocationsController;
 __decorate([
@@ -47,6 +50,16 @@ __decorate([
     __metadata("design:paramtypes", [String, String]),
     __metadata("design:returntype", Promise)
 ], LocationsController.prototype, "getLatestLocations", null);
+__decorate([
+    (0, common_1.Get)('families/:familyId/locations/history/:targetUserId'),
+    __param(0, (0, get_user_decorator_1.GetUser)('id')),
+    __param(1, (0, common_1.Param)('familyId')),
+    __param(2, (0, common_1.Param)('targetUserId')),
+    __param(3, (0, common_1.Query)('date')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String, String]),
+    __metadata("design:returntype", Promise)
+], LocationsController.prototype, "getLocationsHistory", null);
 exports.LocationsController = LocationsController = __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, common_1.Controller)(),

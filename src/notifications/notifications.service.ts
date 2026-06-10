@@ -1,11 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { LocationsGateway } from '../locations/locations.gateway';
 
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger('NotificationsService');
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private locationsGateway: LocationsGateway,
+  ) {}
 
   async sendNotification(userId: string, title: string, message: string, data?: any) {
     const user = await this.prisma.user.findUnique({
@@ -40,6 +44,15 @@ export class NotificationsService {
     this.logger.log(
       `[FCM SIMULASYONU] Aile Grubu (${familyId}) Bildirimi Tetiklendi. Gönderici: ${senderId} | Alıcı Sayısı: ${members.length}`,
     );
+
+    // Canlı soket bildirimi yayınla
+    this.locationsGateway.sendAlertNotification(familyId, {
+      title,
+      message,
+      senderId,
+      data,
+      createdAt: new Date(),
+    });
 
     const promises = members.map((member) =>
       this.sendNotification(member.userId, title, message, data),

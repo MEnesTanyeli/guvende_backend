@@ -1,58 +1,60 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateFamilyDto } from './dto/create-family.dto';
 import { JoinFamilyDto } from './dto/join-family.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 export declare class FamiliesService {
     private prisma;
-    constructor(prisma: PrismaService);
+    private notificationsService;
+    constructor(prisma: PrismaService, notificationsService: NotificationsService);
     create(userId: string, dto: CreateFamilyDto): Promise<{
         id: string;
-        name: string;
         createdAt: Date;
+        name: string;
         updatedAt: Date;
         ownerId: string;
     }>;
     findAll(userId: string): Promise<({
-        owner: {
-            id: string;
-            name: string;
-            email: string;
-        };
         _count: {
             members: number;
         };
+        owner: {
+            id: string;
+            email: string;
+            name: string;
+        };
     } & {
         id: string;
-        name: string;
         createdAt: Date;
+        name: string;
         updatedAt: Date;
         ownerId: string;
     })[]>;
     findOne(userId: string, familyId: string): Promise<{
         owner: {
             id: string;
-            name: string;
             email: string;
+            name: string;
         };
         members: ({
             user: {
                 id: string;
-                name: string;
                 email: string;
+                name: string;
                 phone: string | null;
             };
         } & {
             id: string;
-            createdAt: Date;
-            userId: string;
             familyId: string;
+            userId: string;
             memberType: import(".prisma/client").$Enums.MemberType;
             permissions: string[];
+            createdAt: Date;
         })[];
         safeZones: {
             id: string;
-            name: string;
-            createdAt: Date;
             familyId: string;
+            createdAt: Date;
+            name: string;
             latitude: number;
             longitude: number;
             radius: number;
@@ -60,8 +62,8 @@ export declare class FamiliesService {
         }[];
     } & {
         id: string;
-        name: string;
         createdAt: Date;
+        name: string;
         updatedAt: Date;
         ownerId: string;
     }>;
@@ -76,24 +78,36 @@ export declare class FamiliesService {
         };
     } & {
         id: string;
-        createdAt: Date;
-        userId: string;
         familyId: string;
+        userId: string;
         memberType: import(".prisma/client").$Enums.MemberType;
         permissions: string[];
+        createdAt: Date;
     }>;
     updateMemberRole(userId: string, familyId: string, targetUserId: string, newRole: string): Promise<{
         user: {
             id: string;
-            name: string;
             email: string;
+            name: string;
         };
     } & {
         id: string;
-        createdAt: Date;
-        userId: string;
         familyId: string;
+        userId: string;
         memberType: import(".prisma/client").$Enums.MemberType;
         permissions: string[];
+        createdAt: Date;
+    }>;
+    leave(userId: string, familyId: string): Promise<{
+        success: boolean;
+        message: string;
+    }>;
+    removeMember(userId: string, familyId: string, targetUserId: string): Promise<{
+        success: boolean;
+        message: string;
+    }>;
+    deleteFamily(userId: string, familyId: string): Promise<{
+        success: boolean;
+        message: string;
     }>;
 }

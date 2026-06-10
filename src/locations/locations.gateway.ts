@@ -51,4 +51,11 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
     this.server.to(room).emit('location_update', locationData);
     this.logger.log(`Odaya (${room}) yeni konum yayını yapıldı: ${JSON.stringify(locationData.userId)}`);
   }
+
+  // Aile odasına alarm bildirimini yayınlar
+  sendAlertNotification(familyId: string, alertData: any) {
+    const room = `family_${familyId}`;
+    this.server.to(room).emit('alert_notification', alertData);
+    this.logger.log(`Odaya (${room}) yeni alarm bildirimi yayınlandı: ${alertData.title}`);
+  }
 }

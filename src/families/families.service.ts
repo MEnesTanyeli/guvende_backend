@@ -3,10 +3,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateFamilyDto } from './dto/create-family.dto';
 import { JoinFamilyDto } from './dto/join-family.dto';
 import { MemberType } from '@prisma/client';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class FamiliesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notificationsService: NotificationsService
+  ) {}
 
   async create(userId: string, dto: CreateFamilyDto) {
     // Aile kaydını oluştur ve oluşturanı otomatik olarak guardian (veli/koruyucu) olarak ekle
@@ -235,6 +239,174 @@ export class FamiliesService {
         }
       }
     });
+  }
+
+  // Aile Grubundan Kendi İsteğiyle Ayrılma
+  async leave(userId: string, familyId: string) {
+    const membership = await this.prisma.familyMember.findUnique({
+      where: {
+        familyId_userId: { familyId, userId }
+      },
+      include: { user: true }
+    });
+
+    if (!membership) {
+      throw new NotFoundException('Bu aile grubunun üyesi değilsiniz.');
+    }
+
+    const family = await this.prisma.family.findUnique({
+      where: { id: familyId },
+      include: { members: true }
+    });
+
+    if (!family) {
+      throw new NotFoundException('Aile grubu bulunamadı.');
+    }
+
+    // Veli ayrılma kontrolü
+    if (membership.memberType === MemberType.guardian) {
+      const guardians = family.members.filter(m => m.memberType === MemberType.guardian);
+      
+      if (guardians.length === 1) {
+        // Grupta başka veli yoksa grubu tamamen sil/dağıt
+        return this.deleteFamily(userId, familyId);
+      }
+    }
+
+    // Çocuk veya Yaşlı ise velilere bildirim gönder ve alarm oluştur
+    if (membership.memberType === MemberType.child || membership.memberType === MemberType.elder) {
+      const remainingGuardians = family.members.filter(m => m.memberType === MemberType.guardian && m.userId !== userId);
+      const alertTitle = '🚪 GRUPTAN AYRILMA';
+      const alertMsg = `${membership.user.name} aile grubundan kendi isteğiyle ayrıldı ve konum takibi sonlandırıldı!`;
+
+      // Her veli için veritabanında alarm oluştur
+      for (const guardian of remainingGuardians) {
+        await this.prisma.alert.create({
+          data: {
+            familyId,
+            userId,
+            type: 'family_leave',
+            title: alertTitle,
+            message: alertMsg,
+            status: 'active'
+          }
+        });
+      }
+
+      // Kalan velilere push/socket bildirimi gönder
+      await this.notificationsService.sendFamilyNotification(
+        familyId,
+        userId,
+        alertTitle,
+        alertMsg,
+        { type: 'family_leave', userId }
+      );
+    }
+
+    // Üyelik kaydını sil
+    await this.prisma.familyMember.delete({
+      where: {
+        familyId_userId: { familyId, userId }
+      }
+    });
+
+    return { success: true, message: 'Aile grubundan başarıyla ayrıldınız.' };
+  }
+
+  // Gruptan Üye Çıkarma (Veli Yetkisiyle Kick)
+  async removeMember(userId: string, familyId: string, targetUserId: string) {
+    const editorMembership = await this.prisma.familyMember.findUnique({
+      where: {
+        familyId_userId: { familyId, userId }
+      }
+    });
+
+    if (!editorMembership || editorMembership.memberType !== MemberType.guardian) {
+      throw new ForbiddenException('Sadece veli (guardian) rolündeki üyeler gruptan üye çıkarabilir.');
+    }
+
+    const targetMembership = await this.prisma.familyMember.findUnique({
+      where: {
+        familyId_userId: { familyId, userId: targetUserId }
+      },
+      include: { user: true }
+    });
+
+    if (!targetMembership) {
+      throw new NotFoundException('Çıkarılmak istenen üye bu aile grubunda bulunamadı.');
+    }
+
+    const family = await this.prisma.family.findUnique({
+      where: { id: familyId }
+    });
+
+    if (!family) {
+      throw new NotFoundException('Aile grubu bulunamadı.');
+    }
+
+    if (family.ownerId === targetUserId) {
+      throw new ForbiddenException('Grup kurucusu/sahibi gruptan çıkarılamaz.');
+    }
+
+    if (userId === targetUserId) {
+      throw new ForbiddenException('Kendinizi gruptan çıkaramazsınız. Gruptan ayrılmak için "Ayrıl" özelliğini kullanın.');
+    }
+
+    // Çocuk veya Yaşlı çıkarıldıysa velilere alarm/bildirim gönder
+    if (targetMembership.memberType === MemberType.child || targetMembership.memberType === MemberType.elder) {
+      const alertTitle = '🚫 GRUPTAN ÇIKARILDI';
+      const alertMsg = `${targetMembership.user.name}, veli tarafından aile grubundan çıkarıldı ve konum takibi sonlandırıldı!`;
+
+      // Alarmı veritabanına kaydet
+      await this.prisma.alert.create({
+        data: {
+          familyId,
+          userId: targetUserId,
+          type: 'family_leave',
+          title: alertTitle,
+          message: alertMsg,
+          status: 'active'
+        }
+      });
+
+      // Kalan velilere bildirim gönder
+      await this.notificationsService.sendFamilyNotification(
+        familyId,
+        targetUserId,
+        alertTitle,
+        alertMsg,
+        { type: 'family_leave', userId: targetUserId }
+      );
+    }
+
+    // Üyelik kaydını sil
+    await this.prisma.familyMember.delete({
+      where: {
+        familyId_userId: { familyId, userId: targetUserId }
+      }
+    });
+
+    return { success: true, message: 'Üye aile grubundan başarıyla çıkarıldı.' };
+  }
+
+  // Aile Grubunu Tamamen Silme/Dağıtma
+  async deleteFamily(userId: string, familyId: string) {
+    const membership = await this.prisma.familyMember.findUnique({
+      where: {
+        familyId_userId: { familyId, userId }
+      }
+    });
+
+    if (!membership || membership.memberType !== MemberType.guardian) {
+      throw new ForbiddenException('Sadece veli (guardian) üyeler grubu silebilir/dağıtabilir.');
+    }
+
+    // Family tablosundaki kaydı siler, ilişkili üyeler, alarmlar, bölgeler CASCADE ile silinir
+    await this.prisma.family.delete({
+      where: { id: familyId }
+    });
+
+    return { success: true, message: 'Aile grubu başarıyla silindi ve dağıtıldı.' };
   }
 }
 

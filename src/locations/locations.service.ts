@@ -94,6 +94,8 @@ export class LocationsService {
       const safeZones = await this.prisma.safeZone.findMany({
         where: { familyId },
       });
+      
+      let insideZoneName: string | null = null;
 
       for (const zone of safeZones) {
         const newDist = this.getDistanceInMeters(
@@ -102,6 +104,10 @@ export class LocationsService {
           zone.latitude,
           zone.longitude,
         );
+
+        if (newDist <= zone.radius) {
+          insideZoneName = zone.name;
+        }
 
         if (prevLocation) {
           const prevDist = this.getDistanceInMeters(
@@ -165,8 +171,12 @@ export class LocationsService {
         }
       }
 
-      // 2. Canlı WebSocket Yayını
-      this.locationsGateway.sendLocationUpdate(familyId, newLocation);
+      // 2. Canlı WebSocket Yayını (Bölge adıyla birlikte)
+      const broadcastData = {
+        ...newLocation,
+        insideZoneName,
+      };
+      this.locationsGateway.sendLocationUpdate(familyId, broadcastData);
     }
 
     // 3. Düşük Şarj Kontrolleri
@@ -241,6 +251,10 @@ export class LocationsService {
       throw new ForbiddenException('Bu aile grubunun konum verilerine erişim yetkiniz yok.');
     }
 
+    const safeZones = await this.prisma.safeZone.findMany({
+      where: { familyId },
+    });
+
     // Eğer istek atan üye guardian (veli) değilse, diğerlerinin konumuna erişemez, sadece kendi konumunu görebilir.
     if (isMember.memberType !== MemberType.guardian) {
       const myLocation = await this.prisma.location.findFirst({
@@ -257,7 +271,24 @@ export class LocationsService {
           },
         },
       });
-      return myLocation ? [myLocation] : [];
+
+      if (!myLocation) return [];
+
+      let insideZoneName: string | null = null;
+      for (const zone of safeZones) {
+        const dist = this.getDistanceInMeters(
+          myLocation.latitude,
+          myLocation.longitude,
+          zone.latitude,
+          zone.longitude,
+        );
+        if (dist <= zone.radius) {
+          insideZoneName = zone.name;
+          break;
+        }
+      }
+
+      return [{ ...myLocation, insideZoneName }];
     }
 
     // Ailedeki tüm üyeleri çek
@@ -268,10 +299,10 @@ export class LocationsService {
 
     const userIds = members.map((m) => m.userId);
 
-    // Her üyenin en son konumunu getir
+    // Her üyenin en son konumunu getir ve hangi güvenli bölgede olduğunu hesapla
     const latestLocations = await Promise.all(
       userIds.map(async (uid) => {
-        return this.prisma.location.findFirst({
+        const loc = await this.prisma.location.findFirst({
           where: { userId: uid },
           orderBy: { recordedAt: 'desc' },
           include: {
@@ -285,9 +316,83 @@ export class LocationsService {
             },
           },
         });
+
+        if (!loc) return null;
+
+        let insideZoneName: string | null = null;
+        for (const zone of safeZones) {
+          const dist = this.getDistanceInMeters(
+            loc.latitude,
+            loc.longitude,
+            zone.latitude,
+            zone.longitude,
+          );
+          if (dist <= zone.radius) {
+            insideZoneName = zone.name;
+            break;
+          }
+        }
+
+        return { ...loc, insideZoneName };
       }),
     );
 
     return latestLocations.filter((loc) => loc !== null);
+  }
+
+  async getLocationsHistory(userId: string, familyId: string, targetUserId: string, dateStr?: string) {
+    // Ailede üyelik kontrolü
+    const isMember = await this.prisma.familyMember.findUnique({
+      where: {
+        familyId_userId: {
+          familyId,
+          userId,
+        },
+      },
+    });
+
+    if (!isMember) {
+      throw new ForbiddenException('Bu aile grubunun verilerine erişim yetkiniz yok.');
+    }
+
+    // Hedef kullanıcının ailede üye olup olmadığı kontrolü
+    const targetMember = await this.prisma.familyMember.findUnique({
+      where: {
+        familyId_userId: {
+          familyId,
+          userId: targetUserId,
+        },
+      },
+    });
+
+    if (!targetMember) {
+      throw new NotFoundException('Hedef kullanıcı bu aile grubunda bulunamadı.');
+    }
+
+    // Tarih aralığını belirle
+    const date = dateStr ? new Date(dateStr) : new Date();
+    const startOfDay = new Date(date.setHours(0, 0, 0, 0));
+    const endOfDay = new Date(date.setHours(23, 59, 59, 999));
+
+    return this.prisma.location.findMany({
+      where: {
+        userId: targetUserId,
+        recordedAt: {
+          gte: startOfDay,
+          lte: endOfDay,
+        },
+      },
+      orderBy: {
+        recordedAt: 'asc',
+      },
+      select: {
+        id: true,
+        latitude: true,
+        longitude: true,
+        recordedAt: true,
+        batteryLevel: true,
+        speed: true,
+      },
+    });
   }
 }

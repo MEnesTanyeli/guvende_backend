@@ -18,4 +18,5 @@ export declare class LocationsGateway implements OnGatewayConnection, OnGatewayD
         room: string;
     };
     sendLocationUpdate(familyId: string, locationData: any): void;
+    sendAlertNotification(familyId: string, alertData: any): void;
 }

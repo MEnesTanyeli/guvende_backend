@@ -7,18 +7,18 @@ export declare class UsersController {
     private usersService;
     constructor(usersService: UsersService);
     getProfile(userId: string): Promise<{
+        id: string;
         email: string;
         name: string;
         phone: string | null;
-        id: string;
         role: string;
         createdAt: Date;
     }>;
     updateProfile(userId: string, dto: UpdateProfileDto): Promise<{
+        id: string;
         email: string;
         name: string;
         phone: string | null;
-        id: string;
         role: string;
     }>;
 }

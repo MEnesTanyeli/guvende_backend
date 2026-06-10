@@ -13,10 +13,13 @@ exports.FamiliesService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
 const client_1 = require("@prisma/client");
+const notifications_service_1 = require("../notifications/notifications.service");
 let FamiliesService = class FamiliesService {
     prisma;
-    constructor(prisma) {
+    notificationsService;
+    constructor(prisma, notificationsService) {
         this.prisma = prisma;
+        this.notificationsService = notificationsService;
     }
     async create(userId, dto) {
         return this.prisma.$transaction(async (tx) => {
@@ -213,10 +216,125 @@ let FamiliesService = class FamiliesService {
             }
         });
     }
+    async leave(userId, familyId) {
+        const membership = await this.prisma.familyMember.findUnique({
+            where: {
+                familyId_userId: { familyId, userId }
+            },
+            include: { user: true }
+        });
+        if (!membership) {
+            throw new common_1.NotFoundException('Bu aile grubunun üyesi değilsiniz.');
+        }
+        const family = await this.prisma.family.findUnique({
+            where: { id: familyId },
+            include: { members: true }
+        });
+        if (!family) {
+            throw new common_1.NotFoundException('Aile grubu bulunamadı.');
+        }
+        if (membership.memberType === client_1.MemberType.guardian) {
+            const guardians = family.members.filter(m => m.memberType === client_1.MemberType.guardian);
+            if (guardians.length === 1) {
+                return this.deleteFamily(userId, familyId);
+            }
+        }
+        if (membership.memberType === client_1.MemberType.child || membership.memberType === client_1.MemberType.elder) {
+            const remainingGuardians = family.members.filter(m => m.memberType === client_1.MemberType.guardian && m.userId !== userId);
+            const alertTitle = '🚪 GRUPTAN AYRILMA';
+            const alertMsg = `${membership.user.name} aile grubundan kendi isteğiyle ayrıldı ve konum takibi sonlandırıldı!`;
+            for (const guardian of remainingGuardians) {
+                await this.prisma.alert.create({
+                    data: {
+                        familyId,
+                        userId,
+                        type: 'family_leave',
+                        title: alertTitle,
+                        message: alertMsg,
+                        status: 'active'
+                    }
+                });
+            }
+            await this.notificationsService.sendFamilyNotification(familyId, userId, alertTitle, alertMsg, { type: 'family_leave', userId });
+        }
+        await this.prisma.familyMember.delete({
+            where: {
+                familyId_userId: { familyId, userId }
+            }
+        });
+        return { success: true, message: 'Aile grubundan başarıyla ayrıldınız.' };
+    }
+    async removeMember(userId, familyId, targetUserId) {
+        const editorMembership = await this.prisma.familyMember.findUnique({
+            where: {
+                familyId_userId: { familyId, userId }
+            }
+        });
+        if (!editorMembership || editorMembership.memberType !== client_1.MemberType.guardian) {
+            throw new common_1.ForbiddenException('Sadece veli (guardian) rolündeki üyeler gruptan üye çıkarabilir.');
+        }
+        const targetMembership = await this.prisma.familyMember.findUnique({
+            where: {
+                familyId_userId: { familyId, userId: targetUserId }
+            },
+            include: { user: true }
+        });
+        if (!targetMembership) {
+            throw new common_1.NotFoundException('Çıkarılmak istenen üye bu aile grubunda bulunamadı.');
+        }
+        const family = await this.prisma.family.findUnique({
+            where: { id: familyId }
+        });
+        if (!family) {
+            throw new common_1.NotFoundException('Aile grubu bulunamadı.');
+        }
+        if (family.ownerId === targetUserId) {
+            throw new common_1.ForbiddenException('Grup kurucusu/sahibi gruptan çıkarılamaz.');
+        }
+        if (userId === targetUserId) {
+            throw new common_1.ForbiddenException('Kendinizi gruptan çıkaramazsınız. Gruptan ayrılmak için "Ayrıl" özelliğini kullanın.');
+        }
+        if (targetMembership.memberType === client_1.MemberType.child || targetMembership.memberType === client_1.MemberType.elder) {
+            const alertTitle = '🚫 GRUPTAN ÇIKARILDI';
+            const alertMsg = `${targetMembership.user.name}, veli tarafından aile grubundan çıkarıldı ve konum takibi sonlandırıldı!`;
+            await this.prisma.alert.create({
+                data: {
+                    familyId,
+                    userId: targetUserId,
+                    type: 'family_leave',
+                    title: alertTitle,
+                    message: alertMsg,
+                    status: 'active'
+                }
+            });
+            await this.notificationsService.sendFamilyNotification(familyId, targetUserId, alertTitle, alertMsg, { type: 'family_leave', userId: targetUserId });
+        }
+        await this.prisma.familyMember.delete({
+            where: {
+                familyId_userId: { familyId, userId: targetUserId }
+            }
+        });
+        return { success: true, message: 'Üye aile grubundan başarıyla çıkarıldı.' };
+    }
+    async deleteFamily(userId, familyId) {
+        const membership = await this.prisma.familyMember.findUnique({
+            where: {
+                familyId_userId: { familyId, userId }
+            }
+        });
+        if (!membership || membership.memberType !== client_1.MemberType.guardian) {
+            throw new common_1.ForbiddenException('Sadece veli (guardian) üyeler grubu silebilir/dağıtabilir.');
+        }
+        await this.prisma.family.delete({
+            where: { id: familyId }
+        });
+        return { success: true, message: 'Aile grubu başarıyla silindi ve dağıtıldı.' };
+    }
 };
 exports.FamiliesService = FamiliesService;
 exports.FamiliesService = FamiliesService = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        notifications_service_1.NotificationsService])
 ], FamiliesService);
 //# sourceMappingURL=families.service.js.map

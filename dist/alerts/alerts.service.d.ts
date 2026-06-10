@@ -4,15 +4,15 @@ export declare class AlertsService {
     constructor(prisma: PrismaService);
     findAll(userId: string, familyId: string): Promise<({
         user: {
+            id: string;
             email: string;
             name: string;
-            id: string;
         };
     } & {
-        message: string;
         id: string;
         createdAt: Date;
         familyId: string;
+        message: string;
         userId: string;
         type: import(".prisma/client").$Enums.AlertType;
         status: import(".prisma/client").$Enums.AlertStatus;
@@ -21,10 +21,10 @@ export declare class AlertsService {
         resolvedAt: Date | null;
     })[]>;
     resolve(userId: string, alertId: string): Promise<{
-        message: string;
         id: string;
         createdAt: Date;
         familyId: string;
+        message: string;
         userId: string;
         type: import(".prisma/client").$Enums.AlertType;
         status: import(".prisma/client").$Enums.AlertStatus;

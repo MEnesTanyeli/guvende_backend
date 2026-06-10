@@ -42,6 +42,11 @@ let LocationsGateway = class LocationsGateway {
         this.server.to(room).emit('location_update', locationData);
         this.logger.log(`Odaya (${room}) yeni konum yayını yapıldı: ${JSON.stringify(locationData.userId)}`);
     }
+    sendAlertNotification(familyId, alertData) {
+        const room = `family_${familyId}`;
+        this.server.to(room).emit('alert_notification', alertData);
+        this.logger.log(`Odaya (${room}) yeni alarm bildirimi yayınlandı: ${alertData.title}`);
+    }
 };
 exports.LocationsGateway = LocationsGateway;
 __decorate([

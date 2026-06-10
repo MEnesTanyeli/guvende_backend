@@ -12,11 +12,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.NotificationsService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
+const locations_gateway_1 = require("../locations/locations.gateway");
 let NotificationsService = class NotificationsService {
     prisma;
+    locationsGateway;
     logger = new common_1.Logger('NotificationsService');
-    constructor(prisma) {
+    constructor(prisma, locationsGateway) {
         this.prisma = prisma;
+        this.locationsGateway = locationsGateway;
     }
     async sendNotification(userId, title, message, data) {
         const user = await this.prisma.user.findUnique({
@@ -38,6 +41,13 @@ let NotificationsService = class NotificationsService {
             },
         });
         this.logger.log(`[FCM SIMULASYONU] Aile Grubu (${familyId}) Bildirimi Tetiklendi. Gönderici: ${senderId} | Alıcı Sayısı: ${members.length}`);
+        this.locationsGateway.sendAlertNotification(familyId, {
+            title,
+            message,
+            senderId,
+            data,
+            createdAt: new Date(),
+        });
         const promises = members.map((member) => this.sendNotification(member.userId, title, message, data));
         await Promise.all(promises);
         return { success: true, recipientsCount: members.length };
@@ -46,6 +56,7 @@ let NotificationsService = class NotificationsService {
 exports.NotificationsService = NotificationsService;
 exports.NotificationsService = NotificationsService = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        locations_gateway_1.LocationsGateway])
 ], NotificationsService);
 //# sourceMappingURL=notifications.service.js.map

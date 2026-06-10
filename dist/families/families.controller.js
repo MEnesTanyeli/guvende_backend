@@ -42,6 +42,15 @@ let FamiliesController = class FamiliesController {
     async invite(userId, id) {
         return this.familiesService.invite(userId, id);
     }
+    async leave(userId, id) {
+        return this.familiesService.leave(userId, id);
+    }
+    async removeMember(userId, id, targetUserId) {
+        return this.familiesService.removeMember(userId, id, targetUserId);
+    }
+    async deleteFamily(userId, id) {
+        return this.familiesService.deleteFamily(userId, id);
+    }
 };
 exports.FamiliesController = FamiliesController;
 __decorate([
@@ -92,6 +101,31 @@ __decorate([
     __metadata("design:paramtypes", [String, String]),
     __metadata("design:returntype", Promise)
 ], FamiliesController.prototype, "invite", null);
+__decorate([
+    (0, common_1.Delete)(':id/leave'),
+    __param(0, (0, get_user_decorator_1.GetUser)('id')),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:returntype", Promise)
+], FamiliesController.prototype, "leave", null);
+__decorate([
+    (0, common_1.Delete)(':id/members/:targetUserId'),
+    __param(0, (0, get_user_decorator_1.GetUser)('id')),
+    __param(1, (0, common_1.Param)('id')),
+    __param(2, (0, common_1.Param)('targetUserId')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String]),
+    __metadata("design:returntype", Promise)
+], FamiliesController.prototype, "removeMember", null);
+__decorate([
+    (0, common_1.Delete)(':id'),
+    __param(0, (0, get_user_decorator_1.GetUser)('id')),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:returntype", Promise)
+], FamiliesController.prototype, "deleteFamily", null);
 exports.FamiliesController = FamiliesController = __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, common_1.Controller)('families'),

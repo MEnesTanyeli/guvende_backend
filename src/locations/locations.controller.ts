@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, UseGuards, Query } from '@nestjs/common';
 import { LocationsService } from './locations.service';
 import { RecordLocationDto } from './dto/record-location.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -20,5 +20,15 @@ export class LocationsController {
     @Param('familyId') familyId: string,
   ) {
     return this.locationsService.getLatestLocations(userId, familyId);
+  }
+
+  @Get('families/:familyId/locations/history/:targetUserId')
+  async getLocationsHistory(
+    @GetUser('id') userId: string,
+    @Param('familyId') familyId: string,
+    @Param('targetUserId') targetUserId: string,
+    @Query('date') dateStr?: string,
+  ) {
+    return this.locationsService.getLocationsHistory(userId, familyId, targetUserId, dateStr);
   }
 }
