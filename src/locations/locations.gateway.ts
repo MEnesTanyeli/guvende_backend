@@ -9,6 +9,8 @@ import {
 } from '@nestjs/websockets';
 import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
+import { PrismaService } from '../prisma/prisma.service';
+import { JwtService } from '@nestjs/jwt';
 
 @WebSocketGateway({
   cors: {
@@ -17,20 +19,146 @@ import { Server, Socket } from 'socket.io';
 })
 export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger('LocationsGateway');
+  private activeUsers = new Map<string, Set<string>>();
 
   @WebSocketServer()
   server: Server;
 
-  handleConnection(client: Socket) {
-    this.logger.log(`Soket bağlantısı kuruldu: ${client.id}`);
+  constructor(
+    private prisma: PrismaService,
+    private jwtService: JwtService,
+  ) {}
+
+  async handleConnection(client: Socket) {
+    try {
+      const authHeader = client.handshake.auth?.token || client.handshake.headers?.authorization;
+      let token = '';
+
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.split(' ')[1];
+      } else {
+        const queryToken = client.handshake.query.token as string;
+        if (queryToken) {
+          token = queryToken;
+        }
+      }
+
+      if (!token) {
+        this.logger.warn(`Soket bağlantısı reddedildi: Token bulunamadı. Cihaz: ${client.id}`);
+        client.disconnect(true);
+        return;
+      }
+
+      const payload = this.jwtService.verify(token, {
+        secret: process.env.JWT_SECRET || 'guvende_gizli_anahtar_uretimde_degistirin',
+      });
+      const userId = payload.sub;
+
+      if (!userId) {
+        this.logger.warn(`Soket bağlantısı reddedildi: Geçersiz token payloadı. Cihaz: ${client.id}`);
+        client.disconnect(true);
+        return;
+      }
+
+      client.data.userId = userId;
+      let userSockets = this.activeUsers.get(userId);
+      if (!userSockets) {
+        userSockets = new Set();
+        this.activeUsers.set(userId, userSockets);
+      }
+      userSockets.add(client.id);
+      this.logger.log(`Kullanıcı (${userId}) soket bağlantısı kurdu: ${client.id}`);
+      
+      // Veritabanındaki bağlantı durumunu çevrimiçi yap
+      await this.updateUserConnectionStatus(userId, 'online');
+    } catch (err) {
+      this.logger.error(`Soket bağlantısı doğrulanamadı: ${err.message}. Cihaz: ${client.id}`);
+      client.disconnect(true);
+    }
   }
 
-  handleDisconnect(client: Socket) {
-    this.logger.log(`Soket bağlantısı kesildi: ${client.id}`);
+  async handleDisconnect(client: Socket) {
+    const userId = client.data.userId;
+    if (userId) {
+      const userSockets = this.activeUsers.get(userId);
+      if (userSockets) {
+        userSockets.delete(client.id);
+        this.logger.log(`Kullanıcı (${userId}) bir soket bağlantısını kapattı: ${client.id}`);
+        if (userSockets.size === 0) {
+          this.activeUsers.delete(userId);
+          this.logger.log(`Kullanıcı (${userId}) tamamen ayrıldı. Veritabanı çevrimdışı yapılıyor...`);
+          
+          // Veritabanındaki bağlantı durumunu çevrimdışı yap
+          await this.updateUserConnectionStatus(userId, 'offline');
+          
+          // Tüm aile gruplarına bu kullanıcının çevrimdışı olduğunu bildir
+          await this.broadcastUserOffline(userId);
+        }
+      }
+    } else {
+      this.logger.log(`Soket bağlantısı kesildi (anonim/yetkisiz): ${client.id}`);
+    }
+  }
+
+  private async updateUserConnectionStatus(userId: string, status: 'online' | 'offline') {
+    try {
+      const lastLoc = await this.prisma.location.findFirst({
+        where: { userId },
+        orderBy: { recordedAt: 'desc' },
+      });
+
+      if (lastLoc) {
+        await this.prisma.location.update({
+          where: { id: lastLoc.id },
+          data: { connectionStatus: status },
+        });
+        this.logger.log(`Kullanıcının (${userId}) son konum bağlantı durumu güncellendi: ${status}`);
+      }
+    } catch (err) {
+      this.logger.error(`Bağlantı durumu güncellenirken hata oluştu (userId: ${userId}):`, err);
+    }
+  }
+
+  private async broadcastUserOffline(userId: string) {
+    try {
+      const memberships = await this.prisma.familyMember.findMany({
+        where: { userId },
+        select: { familyId: true },
+      });
+
+      for (const membership of memberships) {
+        const room = `family_${membership.familyId}`;
+        this.server.to(room).emit('user_offline', { userId });
+        this.logger.log(`Odaya (${room}) kullanıcının çevrimdışı olduğu bildirildi: ${userId}`);
+      }
+    } catch (err) {
+      this.logger.error(`Çevrimdışı yayını yapılırken hata oluştu (userId: ${userId}):`, err);
+    }
   }
 
   @SubscribeMessage('joinFamily')
-  handleJoinFamily(@MessageBody() data: { familyId: string }, @ConnectedSocket() client: Socket) {
+  async handleJoinFamily(@MessageBody() data: { familyId: string }, @ConnectedSocket() client: Socket) {
+    const userId = client.data.userId;
+    if (!userId) {
+      this.logger.warn(`Odaya katılım reddedildi: Kullanıcı kimliği doğrulanmamış.`);
+      return { status: 'error', message: 'Yetkisiz erişim.' };
+    }
+
+    // Kullanıcının bu aile grubunda üye olduğunu doğrula
+    const isMember = await this.prisma.familyMember.findUnique({
+      where: {
+        familyId_userId: {
+          familyId: data.familyId,
+          userId: userId,
+        },
+      },
+    });
+
+    if (!isMember) {
+      this.logger.warn(`Kullanıcı (${userId}) üye olmadığı odaya katılmaya çalıştı: family_${data.familyId}`);
+      return { status: 'error', message: 'Bu aile odasına katılma yetkiniz yok.' };
+    }
+
     const room = `family_${data.familyId}`;
     client.join(room);
     this.logger.log(`İstemci (${client.id}), odaya katıldı: ${room}`);
@@ -38,11 +166,68 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   @SubscribeMessage('leaveFamily')
-  handleLeaveFamily(@MessageBody() data: { familyId: string }, @ConnectedSocket() client: Socket) {
+  async handleLeaveFamily(@MessageBody() data: { familyId: string }, @ConnectedSocket() client: Socket) {
+    const userId = client.data.userId;
+    if (!userId) {
+      return { status: 'error', message: 'Yetkisiz erişim' };
+    }
+
     const room = `family_${data.familyId}`;
     client.leave(room);
-    this.logger.log(`İstemci (${client.id}), odadan ayrıldı: ${room}`);
+    this.logger.log(`İstemci (${client.id} - ${userId}), odadan ayrıldı: ${room}`);
     return { status: 'success', room };
+  }
+
+  @SubscribeMessage('sendAudibleWarning')
+  async handleSendAudibleWarning(
+    @MessageBody() data: { targetUserId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    const senderId = client.data.userId;
+    if (!senderId) {
+      return { status: 'error', message: 'Yetkisiz erişim.' };
+    }
+
+    const targetUserId = data.targetUserId;
+    if (!targetUserId) {
+      return { status: 'error', message: 'Hedef kullanıcı belirtilmedi.' };
+    }
+
+    // Yetki kontrolü: Gönderen kişi hedef kişinin bulunduğu bir grupta "veli" mi?
+    const isAuthorized = await this.prisma.familyMember.findFirst({
+      where: {
+        userId: senderId,
+        memberType: 'guardian',
+        family: {
+          members: {
+            some: {
+              userId: targetUserId,
+            },
+          },
+        },
+      },
+    });
+
+    if (!isAuthorized) {
+      this.logger.warn(`Kullanıcı (${senderId}) yetkisi olmadan üye (${targetUserId}) için sesli uyarı göndermeye çalıştı.`);
+      return { status: 'error', message: 'Bu üyeye sesli uyarı gönderme yetkiniz yok.' };
+    }
+
+    const sender = await this.prisma.user.findUnique({
+      where: { id: senderId },
+      select: { name: true },
+    });
+
+    const sent = this.sendEventToUser(targetUserId, 'audible_warning_trigger', {
+      senderName: sender?.name || 'Veliniz',
+      senderId,
+    });
+
+    if (sent) {
+      return { status: 'success', message: 'Sesli uyarı başarıyla gönderildi.' };
+    } else {
+      return { status: 'offline', message: 'Üye şu anda çevrimdışı olduğundan sesli uyarı iletilemedi.' };
+    }
   }
 
   // Aile odasına konum güncellemesini yayınlar
@@ -57,5 +242,19 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
     const room = `family_${familyId}`;
     this.server.to(room).emit('alert_notification', alertData);
     this.logger.log(`Odaya (${room}) yeni alarm bildirimi yayınlandı: ${alertData.title}`);
+  }
+
+  // Belirli bir kullanıcının tüm aktif soketlerine event gönderir
+  sendEventToUser(userId: string, event: string, data: any): boolean {
+    const sockets = this.activeUsers.get(userId);
+    if (sockets && sockets.size > 0) {
+      for (const socketId of sockets) {
+        this.server.to(socketId).emit(event, data);
+      }
+      this.logger.log(`Kullanıcıya (${userId}) özel soket event'i gönderildi: ${event}`);
+      return true;
+    }
+    this.logger.warn(`Kullanıcı (${userId}) çevrimiçi olmadığı için soket event'i gönderilemedi: ${event}`);
+    return false;
   }
 }

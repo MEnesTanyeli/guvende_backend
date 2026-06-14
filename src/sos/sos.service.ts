@@ -5,6 +5,20 @@ import { AlertType, AlertStatus } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 import { LocationsGateway } from '../locations/locations.gateway';
 
+function toTitleCase(str: string): string {
+  if (!str) return '';
+  return str.toLowerCase().split(' ')
+    .map(w => {
+      if (!w) return '';
+      let first = w.charAt(0);
+      if (first === 'i') first = 'İ';
+      else if (first === 'ı') first = 'I';
+      else first = first.toUpperCase();
+      return first + w.slice(1);
+    })
+    .join(' ');
+}
+
 @Injectable()
 export class SosService {
   constructor(
@@ -54,7 +68,8 @@ export class SosService {
 
       // Alarm Kaydet
       const alertTitle = 'ACİL DURUM (SOS) UYARISI!';
-      const alertMsg = `${user.name} ACİL DURUM çağrısı başlattı! Konum: ${dto.latitude}, ${dto.longitude}. Mesaj: ${dto.message || 'Yardıma ihtiyacım var!'}`;
+      const displayName = toTitleCase(user.name);
+      const alertMsg = `${displayName}: "${dto.message || 'Yardıma ihtiyacım var!'}" (Konum: ${dto.latitude}, ${dto.longitude})`;
 
       const alert = await this.prisma.alert.create({
         data: {

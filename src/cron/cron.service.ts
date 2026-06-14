@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { AlertStatus, AlertType } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
+import { LocationsGateway } from '../locations/locations.gateway';
 
 @Injectable()
 export class CronService {
@@ -11,6 +12,7 @@ export class CronService {
   constructor(
     private prisma: PrismaService,
     private notificationsService: NotificationsService,
+    private locationsGateway: LocationsGateway,
   ) {}
 
   // Mesafe hesabı için Haversine Formülü
@@ -64,8 +66,8 @@ export class CronService {
 
       const userName = user ? user.name : 'Bilinmeyen Üye';
 
-      // Eğer hiç konum kaydı yoksa veya son konum kaydı 10 dakikadan daha eski ise
-      if (!lastLocation || lastLocation.recordedAt < tenMinutesAgo) {
+      // Eğer en son konum kaydı varsa ve son konum kaydı 10 dakikadan daha eski ise
+      if (lastLocation && lastLocation.recordedAt < tenMinutesAgo) {
         // Zaten aktif/çözülmemiş bir bağlantı koptu uyarısı var mı?
         const activeAlert = await this.prisma.alert.findFirst({
           where: {
@@ -141,8 +143,13 @@ export class CronService {
         orderBy: { recordedAt: 'desc' },
       });
 
-      // Hareketsizlik tespiti için en az 2 konum olmalı ve son konum aktif olmalı (30 dakikadan eski olmamalı)
-      if (locations.length >= 2 && locations[0].recordedAt >= thirtyMinutesAgo) {
+      // Hareketsizlik tespiti için en az 2 konum olmalı, son konum aktif olmalı (30 dakikadan eski olmamalı)
+      // ve bu konumların kapsadığı zaman aralığı en az 7.5 saat olmalı (yeni kullanıcılar için yanlış alarm verilmemesi amacıyla)
+      if (
+        locations.length >= 2 &&
+        locations[0].recordedAt >= thirtyMinutesAgo &&
+        (locations[0].recordedAt.getTime() - locations[locations.length - 1].recordedAt.getTime() >= 7.5 * 60 * 60 * 1000)
+      ) {
         const latestLoc = locations[0];
         
         // Son 8 saatteki tüm noktalar son noktaya 20 metreden yakın mı?
@@ -202,5 +209,72 @@ export class CronService {
       }
     }
     this.logger.log('Hareketsizlik kontrolü zamanlanmış görevi tamamlandı.');
+  }
+
+  // 3. İlaç Hatırlatıcı Kontrolü (Her dakika çalışır)
+  @Cron('0 * * * * *')
+  async handleMedicationReminderCheck() {
+    this.logger.log('İlaç hatırlatıcı kontrolü zamanlanmış görevi başlatılıyor...');
+
+    const localTime = new Date().toLocaleTimeString('tr-TR', {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'Europe/Istanbul',
+    });
+
+    const activeReminders = await this.prisma.medicationReminder.findMany({
+      where: {
+        time: localTime,
+        isActive: true,
+      },
+      include: {
+        user: true,
+      },
+    });
+
+    // Filtreleme: Başlangıç tarihi (startDate) ve Tekrar Gün Sayısı (repeatDays)
+    const nowInIstanbul = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Istanbul' }));
+    const today = new Date(nowInIstanbul.getFullYear(), nowInIstanbul.getMonth(), nowInIstanbul.getDate());
+
+    const filteredReminders = activeReminders.filter(reminder => {
+      const start = new Date(reminder.startDate);
+      const startDateOnly = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+      
+      // Gelecek tarihli ise tetikleme
+      if (startDateOnly > today) {
+        return false;
+      }
+      
+      // Tekrar gün sınırı varsa kontrol et (Boş/Null ise sınırsız)
+      if (reminder.repeatDays && reminder.repeatDays > 0) {
+        const msPerDay = 24 * 60 * 60 * 1000;
+        const diffDays = Math.round((today.getTime() - startDateOnly.getTime()) / msPerDay);
+        if (diffDays >= reminder.repeatDays) {
+          return false; // Tekrar süresi dolmuş
+        }
+      }
+      return true;
+    });
+
+    if (filteredReminders.length > 0) {
+      this.logger.log(`Saat ${localTime} için ${filteredReminders.length} adet aktif hatırlatıcı tetikleniyor.`);
+    }
+
+    for (const reminder of filteredReminders) {
+      const sent = this.locationsGateway.sendEventToUser(reminder.userId, 'medication_reminder_trigger', {
+        reminderId: reminder.id,
+        medicationName: reminder.medicationName,
+        dosage: reminder.dosage,
+        time: reminder.time,
+        reminderType: reminder.reminderType,
+      });
+
+      if (sent) {
+        this.logger.log(`Hatırlatıcı alarmı (${reminder.medicationName} - ${reminder.reminderType}) kullanıcıya (${reminder.user.name}) iletildi.`);
+      } else {
+        this.logger.warn(`Kullanıcı (${reminder.user.name}) çevrimdışı olduğu için hatırlatıcı alarmı iletilemedi.`);
+      }
+    }
   }
 }

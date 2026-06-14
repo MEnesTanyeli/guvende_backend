@@ -15,6 +15,9 @@ import { AlertsModule } from './alerts/alerts.module';
 import { SosModule } from './sos/sos.module';
 import { ActivityModule } from './activity/activity.module';
 import { CronModule } from './cron/cron.module';
+import { MedicationsModule } from './medications/medications.module';
+import { AppUsageModule } from './app-usage/app-usage.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -32,6 +35,9 @@ import { CronModule } from './cron/cron.module';
     SosModule,
     ActivityModule,
     CronModule,
+    MedicationsModule,
+    AppUsageModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -21,6 +21,10 @@ export class AlertsService {
       throw new ForbiddenException('Bu aile grubunun alarmlarını görüntüleme yetkiniz yok.');
     }
 
+    if (membership.memberType !== MemberType.guardian) {
+      throw new ForbiddenException('Sadece veliler/koruyucular (guardian) alarmları görüntüleyebilir.');
+    }
+
     return this.prisma.alert.findMany({
       where: {
         familyId,
@@ -69,6 +73,37 @@ export class AlertsService {
 
     return this.prisma.alert.update({
       where: { id: alertId },
+      data: {
+        status: AlertStatus.resolved,
+        resolvedAt: new Date(),
+      },
+    });
+  }
+
+  async resolveAll(userId: string, familyId: string) {
+    // Aile grubu üyeliği ve gardiyan rolünü doğrula
+    const membership = await this.prisma.familyMember.findUnique({
+      where: {
+        familyId_userId: {
+          familyId,
+          userId,
+        },
+      },
+    });
+
+    if (!membership) {
+      throw new ForbiddenException('Bu aile grubunun alarmlarını çözmeye yetkiniz yok.');
+    }
+
+    if (membership.memberType !== MemberType.guardian) {
+      throw new ForbiddenException('Sadece veliler/koruyucular (guardian) alarmları çözebilir.');
+    }
+
+    return this.prisma.alert.updateMany({
+      where: {
+        familyId,
+        status: AlertStatus.active,
+      },
       data: {
         status: AlertStatus.resolved,
         resolvedAt: new Date(),

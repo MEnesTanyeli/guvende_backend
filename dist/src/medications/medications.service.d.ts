@@ -1,0 +1,81 @@
+import { PrismaService } from '../prisma/prisma.service';
+import { CreateMedicationDto } from './dto/create-medication.dto';
+import { UpdateMedicationDto } from './dto/update-medication.dto';
+import { UsersService } from '../users/users.service';
+import { LocationsGateway } from '../locations/locations.gateway';
+export declare class MedicationsService {
+    private prisma;
+    private usersService;
+    private locationsGateway;
+    constructor(prisma: PrismaService, usersService: UsersService, locationsGateway: LocationsGateway);
+    createReminder(creatorId: string, dto: CreateMedicationDto): Promise<{
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        userId: string;
+        medicationName: string;
+        dosage: string;
+        time: string;
+        isActive: boolean;
+        lastTakenAt: Date | null;
+        reminderType: string;
+        startDate: Date;
+        repeatDays: number | null;
+    }>;
+    getReminders(userId: string): Promise<{
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        userId: string;
+        medicationName: string;
+        dosage: string;
+        time: string;
+        isActive: boolean;
+        lastTakenAt: Date | null;
+        reminderType: string;
+        startDate: Date;
+        repeatDays: number | null;
+    }[]>;
+    deleteReminder(reminderId: string, deleterId: string): Promise<{
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        userId: string;
+        medicationName: string;
+        dosage: string;
+        time: string;
+        isActive: boolean;
+        lastTakenAt: Date | null;
+        reminderType: string;
+        startDate: Date;
+        repeatDays: number | null;
+    }>;
+    takeMedication(reminderId: string, userId: string): Promise<{
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        userId: string;
+        medicationName: string;
+        dosage: string;
+        time: string;
+        isActive: boolean;
+        lastTakenAt: Date | null;
+        reminderType: string;
+        startDate: Date;
+        repeatDays: number | null;
+    }>;
+    updateReminder(reminderId: string, updaterId: string, dto: UpdateMedicationDto): Promise<{
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        userId: string;
+        medicationName: string;
+        dosage: string;
+        time: string;
+        isActive: boolean;
+        lastTakenAt: Date | null;
+        reminderType: string;
+        startDate: Date;
+        repeatDays: number | null;
+    }>;
+}

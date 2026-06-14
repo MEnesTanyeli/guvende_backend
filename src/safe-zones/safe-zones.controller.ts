@@ -2,9 +2,10 @@ import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/c
 import { SafeZonesService } from './safe-zones.service';
 import { CreateSafeZoneDto } from './dto/create-safe-zone.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { SubscriptionGuard } from '../auth/guards/subscription.guard';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, SubscriptionGuard)
 @Controller()
 export class SafeZonesController {
   constructor(private safeZonesService: SafeZonesService) {}

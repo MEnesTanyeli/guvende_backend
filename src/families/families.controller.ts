@@ -62,5 +62,14 @@ export class FamiliesController {
   async deleteFamily(@GetUser('id') userId: string, @Param('id') id: string) {
     return this.familiesService.deleteFamily(userId, id);
   }
+
+  @Patch(':id/mute')
+  async muteNotifications(
+    @GetUser('id') userId: string,
+    @Param('id') familyId: string,
+    @Body() body: { mute: boolean },
+  ) {
+    return this.familiesService.muteNotifications(userId, familyId, body.mute);
+  }
 }
 

@@ -117,4 +117,20 @@ export class ActivityService {
       createdAt: new Date(),
     };
   }
+
+  async checkCommonFamily(userId: string, targetUserId: string): Promise<boolean> {
+    const common = await this.prisma.familyMember.findFirst({
+      where: {
+        userId: targetUserId,
+        family: {
+          members: {
+            some: {
+              userId: userId,
+            },
+          },
+        },
+      },
+    });
+    return !!common;
+  }
 }

@@ -1,0 +1,26 @@
+GÜVENDE PROJESİ CANLIYA GEÇİŞ EKSİKLER LİSTESİ
+
+[X] 1. WebSocket Yetkilendirme ve Erişim Kontrolü Eksikliği (Çözülüyor)
+    - Soket bağlantısında JWT doğrulaması yapılacak.
+    - Aile odasına katılma (joinFamily) isteğinde, kullanıcının o ailede üye olup olmadığı veritabanından doğrulanacak.
+
+[ ] 2. Mobil Uygulama Canlı Ortam API URL Değişikliği (environment.prod.ts)
+    - environment.prod.ts dosyasındaki apiUrl yerel IP adresi (192.168.1.136) yerine gerçek canlı HTTPS adresiyle güncellenecek.
+
+[X] 3. Güvensiz JWT Sırrı (JWT Secret Key) Yapılandırması (Çözülüyor)
+    - JwtModule.register yerine JwtModule.registerAsync kullanılacak ve ConfigService ile çevresel değişkenler güvenli yüklenecek.
+
+[ ] 4. Android Cleartext (HTTP) İzinleri
+    - AndroidManifest.xml dosyasındaki android:usesCleartextTraffic="true" kaldırılacak ya da false yapılacak (HTTPS zorunluluğu).
+
+[ ] 5. CORS Wildcard İzni
+    - main.ts dosyasındaki app.enableCors() üretici IP/alan adı ile kısıtlanacak.
+
+[ ] 6. Google Play Politika Hazırlıkları
+    - Arka plan konum bilgisi kullanımına dair uygulama içi net açıklama (disclosure) eklenecek.
+    - Google Play Console için açıklama videosu hazırlanacak.
+    - Android güç tasarrufu / pil optimizasyonu istisnası yönlendirmesi eklenecek.
+
+[ ] 7. Canlı Ortam Değişkenleri (.env) Güncellemesi
+    - JWT_SECRET güçlü bir şifreyle güncellenecek.
+    - OneSignal API anahtarları canlı hesap anahtarlarıyla değiştirilecek.

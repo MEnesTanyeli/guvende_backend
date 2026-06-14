@@ -2,9 +2,10 @@ import { Body, Controller, Get, Param, Post, UseGuards, Query } from '@nestjs/co
 import { LocationsService } from './locations.service';
 import { RecordLocationDto } from './dto/record-location.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { SubscriptionGuard } from '../auth/guards/subscription.guard';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, SubscriptionGuard)
 @Controller()
 export class LocationsController {
   constructor(private locationsService: LocationsService) {}
