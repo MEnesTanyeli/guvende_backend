@@ -230,6 +230,66 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @SubscribeMessage('sendDeviceLock')
+  async handleSendDeviceLock(
+    @MessageBody() data: { targetUserId: string; lockState: boolean },
+    @ConnectedSocket() client: Socket,
+  ) {
+    const senderId = client.data.userId;
+    if (!senderId) {
+      return { status: 'error', message: 'Yetkisiz erişim.' };
+    }
+
+    const { targetUserId, lockState } = data;
+    if (!targetUserId) {
+      return { status: 'error', message: 'Hedef kullanıcı belirtilmedi.' };
+    }
+
+    // Yetki kontrolü: Gönderen kişi hedef kişinin bulunduğu bir grupta "veli" mi?
+    const isAuthorized = await this.prisma.familyMember.findFirst({
+      where: {
+        userId: senderId,
+        memberType: 'guardian',
+        family: {
+          members: {
+            some: {
+              userId: targetUserId,
+            },
+          },
+        },
+      },
+    });
+
+    if (!isAuthorized) {
+      this.logger.warn(`Kullanıcı (${senderId}) yetkisi olmadan üye (${targetUserId}) için cihaz kilidi sinyali göndermeye çalıştı.`);
+      return { status: 'error', message: 'Bu üyeye cihaz kilidi sinyali gönderme yetkiniz yok.' };
+    }
+
+    // Veritabanındaki kilitleme durumunu güncelle
+    await this.prisma.user.update({
+      where: { id: targetUserId },
+      data: { isLocked: lockState }
+    });
+
+    const sender = await this.prisma.user.findUnique({
+      where: { id: senderId },
+      select: { name: true },
+    });
+
+    // Canlı WebSocket kilitleme sinyalini ilet
+    const sent = this.sendEventToUser(targetUserId, 'device_lock_trigger', {
+      lockState,
+      senderName: sender?.name || 'Veliniz',
+      senderId,
+    });
+
+    if (sent) {
+      return { status: 'success', message: `Cihaz kilidi durumu başarıyla iletildi.` };
+    } else {
+      return { status: 'success', message: 'Üye şu anda çevrimdışı, ancak kilit durumu kaydedildi. İlk bağlantıda uygulanacak.' };
+    }
+  }
+
   // Aile odasına konum güncellemesini yayınlar
   sendLocationUpdate(familyId: string, locationData: any) {
     const room = `family_${familyId}`;

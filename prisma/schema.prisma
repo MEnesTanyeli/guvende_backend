@@ -40,6 +40,7 @@ model User {
   trialEndsAt       DateTime           @default(now())
   isPremium         Boolean            @default(false)
   premiumExpiresAt  DateTime?
+  isLocked          Boolean            @default(false)
   proxyId           String?
   proxy             User?              @relation("UserProxy", fields: [proxyId], references: [id])
   proxiedBy         User[]             @relation("UserProxy")

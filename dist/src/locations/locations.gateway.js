@@ -197,6 +197,52 @@ let LocationsGateway = class LocationsGateway {
             return { status: 'offline', message: 'Üye şu anda çevrimdışı olduğundan sesli uyarı iletilemedi.' };
         }
     }
+    async handleSendDeviceLock(data, client) {
+        const senderId = client.data.userId;
+        if (!senderId) {
+            return { status: 'error', message: 'Yetkisiz erişim.' };
+        }
+        const { targetUserId, lockState } = data;
+        if (!targetUserId) {
+            return { status: 'error', message: 'Hedef kullanıcı belirtilmedi.' };
+        }
+        const isAuthorized = await this.prisma.familyMember.findFirst({
+            where: {
+                userId: senderId,
+                memberType: 'guardian',
+                family: {
+                    members: {
+                        some: {
+                            userId: targetUserId,
+                        },
+                    },
+                },
+            },
+        });
+        if (!isAuthorized) {
+            this.logger.warn(`Kullanıcı (${senderId}) yetkisi olmadan üye (${targetUserId}) için cihaz kilidi sinyali göndermeye çalıştı.`);
+            return { status: 'error', message: 'Bu üyeye cihaz kilidi sinyali gönderme yetkiniz yok.' };
+        }
+        await this.prisma.user.update({
+            where: { id: targetUserId },
+            data: { isLocked: lockState }
+        });
+        const sender = await this.prisma.user.findUnique({
+            where: { id: senderId },
+            select: { name: true },
+        });
+        const sent = this.sendEventToUser(targetUserId, 'device_lock_trigger', {
+            lockState,
+            senderName: sender?.name || 'Veliniz',
+            senderId,
+        });
+        if (sent) {
+            return { status: 'success', message: `Cihaz kilidi durumu başarıyla iletildi.` };
+        }
+        else {
+            return { status: 'success', message: 'Üye şu anda çevrimdışı, ancak kilit durumu kaydedildi. İlk bağlantıda uygulanacak.' };
+        }
+    }
     sendLocationUpdate(familyId, locationData) {
         const room = `family_${familyId}`;
         this.server.to(room).emit('location_update', locationData);
@@ -249,6 +295,14 @@ __decorate([
     __metadata("design:paramtypes", [Object, socket_io_1.Socket]),
     __metadata("design:returntype", Promise)
 ], LocationsGateway.prototype, "handleSendAudibleWarning", null);
+__decorate([
+    (0, websockets_1.SubscribeMessage)('sendDeviceLock'),
+    __param(0, (0, websockets_1.MessageBody)()),
+    __param(1, (0, websockets_1.ConnectedSocket)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, socket_io_1.Socket]),
+    __metadata("design:returntype", Promise)
+], LocationsGateway.prototype, "handleSendDeviceLock", null);
 exports.LocationsGateway = LocationsGateway = __decorate([
     (0, websockets_1.WebSocketGateway)({
         cors: {

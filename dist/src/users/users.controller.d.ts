@@ -31,6 +31,7 @@ export declare class UsersController {
             email: string;
             name: string;
         } | null;
+        isLocked: boolean;
         createdAt: Date;
     }>;
     updateProfile(userId: string, dto: UpdateProfileDto): Promise<{
@@ -51,6 +52,7 @@ export declare class UsersController {
             email: string;
             name: string;
         } | null;
+        isLocked: boolean;
         createdAt: Date;
     }>;
     purchasePremiumMock(userId: string): Promise<{
@@ -71,6 +73,7 @@ export declare class UsersController {
             email: string;
             name: string;
         } | null;
+        isLocked: boolean;
         createdAt: Date;
     }>;
     setProxy(userId: string, body: {
@@ -93,6 +96,7 @@ export declare class UsersController {
             email: string;
             name: string;
         } | null;
+        isLocked: boolean;
         createdAt: Date;
     }>;
     removeProxyPatch(userId: string): Promise<{
@@ -113,6 +117,7 @@ export declare class UsersController {
             email: string;
             name: string;
         } | null;
+        isLocked: boolean;
         createdAt: Date;
     }>;
     removeProxyPost(userId: string): Promise<{
@@ -133,6 +138,7 @@ export declare class UsersController {
             email: string;
             name: string;
         } | null;
+        isLocked: boolean;
         createdAt: Date;
     }>;
     requestEmailChange(userId: string, dto: RequestEmailChangeDto): Promise<{
@@ -156,6 +162,7 @@ export declare class UsersController {
             email: string;
             name: string;
         } | null;
+        isLocked: boolean;
         createdAt: Date;
     }>;
 }

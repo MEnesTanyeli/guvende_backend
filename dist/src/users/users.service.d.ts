@@ -20,6 +20,7 @@ export declare class UsersService {
             email: string;
             name: string;
         } | null;
+        isLocked: boolean;
         createdAt: Date;
     }>;
     updateProfile(id: string, name?: string, phone?: string, gender?: string): Promise<{
@@ -40,6 +41,7 @@ export declare class UsersService {
             email: string;
             name: string;
         } | null;
+        isLocked: boolean;
         createdAt: Date;
     }>;
     purchasePremiumMock(id: string): Promise<{
@@ -60,6 +62,7 @@ export declare class UsersService {
             email: string;
             name: string;
         } | null;
+        isLocked: boolean;
         createdAt: Date;
     }>;
     setProxy(userId: string, email: string): Promise<{
@@ -80,6 +83,7 @@ export declare class UsersService {
             email: string;
             name: string;
         } | null;
+        isLocked: boolean;
         createdAt: Date;
     }>;
     removeProxy(userId: string): Promise<{
@@ -100,6 +104,7 @@ export declare class UsersService {
             email: string;
             name: string;
         } | null;
+        isLocked: boolean;
         createdAt: Date;
     }>;
     requestEmailChange(userId: string, newEmail: string): Promise<{
@@ -123,6 +128,7 @@ export declare class UsersService {
             email: string;
             name: string;
         } | null;
+        isLocked: boolean;
         createdAt: Date;
     }>;
 }

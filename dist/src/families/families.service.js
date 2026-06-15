@@ -140,6 +140,7 @@ let FamiliesService = class FamiliesService {
                                 email: true,
                                 phone: true,
                                 gender: true,
+                                isLocked: true,
                             },
                         },
                     },

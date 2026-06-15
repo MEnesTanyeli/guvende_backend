@@ -48,6 +48,7 @@ export declare class FamiliesService {
                 name: string;
                 phone: string | null;
                 gender: string | null;
+                isLocked: boolean;
             };
         } & {
             id: string;

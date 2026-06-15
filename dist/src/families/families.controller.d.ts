@@ -78,6 +78,7 @@ export declare class FamiliesController {
                 name: string;
                 phone: string | null;
                 gender: string | null;
+                isLocked: boolean;
             };
         } & {
             id: string;

@@ -41,6 +41,13 @@ export declare class LocationsGateway implements OnGatewayConnection, OnGatewayD
         status: string;
         message: string;
     }>;
+    handleSendDeviceLock(data: {
+        targetUserId: string;
+        lockState: boolean;
+    }, client: Socket): Promise<{
+        status: string;
+        message: string;
+    }>;
     sendLocationUpdate(familyId: string, locationData: any): void;
     sendAlertNotification(familyId: string, alertData: any): void;
     sendEventToUser(userId: string, event: string, data: any): boolean;

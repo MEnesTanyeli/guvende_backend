@@ -87,6 +87,7 @@ let UsersService = class UsersService {
             isInFamily,
             isProxy,
             proxy: user.proxy ? { id: user.proxy.id, email: user.proxy.email, name: user.proxy.name } : null,
+            isLocked: user.isLocked,
             createdAt: user.createdAt,
         };
     }

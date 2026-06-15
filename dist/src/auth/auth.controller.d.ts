@@ -33,6 +33,7 @@ export declare class AuthController {
                 email: string;
                 name: string;
             } | null;
+            isLocked: boolean;
             createdAt: Date;
         };
     }>;
@@ -57,6 +58,7 @@ export declare class AuthController {
                 email: string;
                 name: string;
             } | null;
+            isLocked: boolean;
             createdAt: Date;
         };
     }>;
@@ -81,6 +83,7 @@ export declare class AuthController {
                 email: string;
                 name: string;
             } | null;
+            isLocked: boolean;
             createdAt: Date;
         };
     }>;

@@ -29,6 +29,7 @@ export declare class AuthService {
                 email: string;
                 name: string;
             } | null;
+            isLocked: boolean;
             createdAt: Date;
         };
     }>;
@@ -53,6 +54,7 @@ export declare class AuthService {
                 email: string;
                 name: string;
             } | null;
+            isLocked: boolean;
             createdAt: Date;
         };
     }>;
@@ -77,6 +79,7 @@ export declare class AuthService {
                 email: string;
                 name: string;
             } | null;
+            isLocked: boolean;
             createdAt: Date;
         };
     }>;
