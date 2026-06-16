@@ -101,19 +101,14 @@ export class NotificationsService {
       },
     });
 
-    const isSenderGuardian = sender?.memberType === 'guardian';
-
     // Aile üyelerini çek (gönderen kişi hariç)
-    // Gönderici veli ise, çocukların ve yaşlıların (elder) bildirim almaması için alıcıları sadece diğer velilerle sınırla
-    // Ayrıca bu aile için bildirimleri sessize almış olanları hariç tut
+    // Bildirimler sadece velilere (guardian) gidecektir, çocuk ve yaşlılar bildirim almayacaktır.
     const members = await this.prisma.familyMember.findMany({
       where: {
         familyId,
         userId: { not: senderId },
         muteNotifications: false,
-        ...(isSenderGuardian
-          ? { memberType: { notIn: ['child', 'elder'] } }
-          : {}),
+        memberType: 'guardian',
       },
       select: {
         userId: true,

@@ -37,12 +37,12 @@ export class FamiliesService {
       throw new ConflictException('Aynı isimde birden fazla aile grubu oluşturamazsınız.');
     }
 
-    const existingFamiliesCount = await this.prisma.family.count({
-      where: { ownerId: userId },
+    const totalMemberships = await this.prisma.familyMember.count({
+      where: { userId },
     });
 
-    if (existingFamiliesCount >= 2) {
-      throw new ForbiddenException('Bir üye en fazla 2 aile grubu oluşturabilir.');
+    if (totalMemberships >= 2) {
+      throw new ForbiddenException('En fazla 2 aile grubunda yer alabilirsiniz.');
     }
 
     // Aile kaydını oluştur ve oluşturanı otomatik olarak guardian (veli/koruyucu) olarak ekle
@@ -190,25 +190,18 @@ export class FamiliesService {
   }
 
   async join(userId: string, dto: JoinFamilyDto) {
-    const family = await this.prisma.family.findUnique({
-      where: { id: dto.familyId },
+    const familyIdToSearch = dto.familyId.trim().toLowerCase();
+    const family = await this.prisma.family.findFirst({
+      where: {
+        OR: [
+          { id: familyIdToSearch },
+          { id: { startsWith: familyIdToSearch } }
+        ]
+      },
     });
 
     if (!family) {
       throw new NotFoundException('Geçersiz aile davet kodu.');
-    }
-
-    const existingMember = await this.prisma.familyMember.findUnique({
-      where: {
-        familyId_userId: {
-          familyId: dto.familyId,
-          userId,
-        },
-      },
-    });
-
-    if (existingMember) {
-      throw new ConflictException('Zaten bu aile grubunun bir üyesisiniz.');
     }
 
     const joiningUser = await this.prisma.user.findUnique({
@@ -220,14 +213,41 @@ export class FamiliesService {
       throw new NotFoundException('Kullanıcı bulunamadı.');
     }
 
+    // Üyelik limit kontrolü
+    const currentMembershipsCount = await this.prisma.familyMember.count({
+      where: { userId },
+    });
+
+    const isGuardian = joiningUser.role !== 'child' && joiningUser.role !== 'elder';
+    if (isGuardian) {
+      if (currentMembershipsCount >= 2) {
+        throw new ForbiddenException('Veliler en fazla 2 aile grubunda yer alabilir.');
+      }
+    } else {
+      if (currentMembershipsCount >= 1) {
+        throw new ForbiddenException('Çocuklar veya aile büyükleri sadece 1 aile grubunda yer alabilir.');
+      }
+    }
+
+    const existingMember = await this.prisma.familyMember.findUnique({
+      where: {
+        familyId_userId: {
+          familyId: family.id,
+          userId,
+        },
+      },
+    });
+
+    if (existingMember) {
+      throw new ConflictException('Zaten bu aile grubunun bir üyesisiniz.');
+    }
+
     const memberTypeToUse = dto.memberType || (joiningUser.role as MemberType) || MemberType.child;
-
-
 
     if (memberTypeToUse === MemberType.guardian) {
       const guardianCount = await this.prisma.familyMember.count({
         where: {
-          familyId: dto.familyId,
+          familyId: family.id,
           memberType: MemberType.guardian,
         },
       });
@@ -239,7 +259,7 @@ export class FamiliesService {
 
     return this.prisma.familyMember.create({
       data: {
-        familyId: dto.familyId,
+        familyId: family.id,
         userId: userId,
         memberType: memberTypeToUse,
         permissions: [],
