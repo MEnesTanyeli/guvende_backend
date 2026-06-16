@@ -300,12 +300,11 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
   // Aile odasındaki sadece velilere (guardian) alarm bildirimini gönderir
   async sendAlertNotification(familyId: string, alertData: any) {
     try {
-      const senderId = alertData.senderId || alertData.userId;
+      const senderId = alertData.senderId || alertData.userId || alertData.data?.userId;
       
       const guardians = await this.prisma.familyMember.findMany({
         where: {
           familyId,
-          userId: senderId ? { not: senderId } : undefined,
           memberType: 'guardian',
         },
         select: {
@@ -313,10 +312,15 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
         },
       });
 
-      for (const guardian of guardians) {
+      let targetGuardians = guardians;
+      if (senderId) {
+        targetGuardians = guardians.filter(g => g.userId !== senderId);
+      }
+
+      for (const guardian of targetGuardians) {
         this.sendEventToUser(guardian.userId, 'alert_notification', alertData);
       }
-      this.logger.log(`Aile Grubu (${familyId}) için velilere (${guardians.length} kişi) alarm bildirimi iletildi: ${alertData.title}`);
+      this.logger.log(`Aile Grubu (${familyId}) için velilere (${targetGuardians.length} kişi) alarm bildirimi iletildi: ${alertData.title}`);
     } catch (err) {
       this.logger.error(`Alarm bildirimi velilere gönderilirken hata oluştu: ${err.message}`);
     }

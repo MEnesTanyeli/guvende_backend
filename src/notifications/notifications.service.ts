@@ -129,7 +129,10 @@ export class NotificationsService {
       createdAt: new Date(),
     });
 
-    const targetUserIds = members.map((member) => member.userId);
+    let targetUserIds = members.map((member) => member.userId);
+    if (senderId) {
+      targetUserIds = targetUserIds.filter(id => id !== senderId);
+    }
 
     // OneSignal üzerinden tüm aile üyelerine push bildirim gönder
     if (targetUserIds.length > 0) {
