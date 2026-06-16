@@ -5,12 +5,16 @@ import { NotificationsService } from '../notifications/notifications.service';
 export declare class FamiliesService {
     private prisma;
     private notificationsService;
+    private readonly inviteCodeAlphabet;
     constructor(prisma: PrismaService, notificationsService: NotificationsService);
+    private createInviteCode;
+    private generateUniqueInviteCode;
     create(userId: string, dto: CreateFamilyDto): Promise<{
         id: string;
         name: string;
         createdAt: Date;
         updatedAt: Date;
+        inviteCode: string | null;
         type: string;
         ownerId: string;
     }>;
@@ -32,6 +36,7 @@ export declare class FamiliesService {
         name: string;
         createdAt: Date;
         updatedAt: Date;
+        inviteCode: string | null;
         type: string;
         ownerId: string;
     })[]>;
@@ -74,6 +79,7 @@ export declare class FamiliesService {
         name: string;
         createdAt: Date;
         updatedAt: Date;
+        inviteCode: string | null;
         type: string;
         ownerId: string;
     }>;

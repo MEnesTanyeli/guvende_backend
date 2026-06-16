@@ -124,15 +124,12 @@ let NotificationsService = class NotificationsService {
                 memberType: true,
             },
         });
-        const isSenderGuardian = sender?.memberType === 'guardian';
         const members = await this.prisma.familyMember.findMany({
             where: {
                 familyId,
                 userId: { not: senderId },
                 muteNotifications: false,
-                ...(isSenderGuardian
-                    ? { memberType: { notIn: ['child', 'elder'] } }
-                    : {}),
+                memberType: 'guardian',
             },
             select: {
                 userId: true,

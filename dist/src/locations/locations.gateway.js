@@ -248,10 +248,27 @@ let LocationsGateway = class LocationsGateway {
         this.server.to(room).emit('location_update', locationData);
         this.logger.log(`Odaya (${room}) yeni konum yayını yapıldı: ${JSON.stringify(locationData.userId)}`);
     }
-    sendAlertNotification(familyId, alertData) {
-        const room = `family_${familyId}`;
-        this.server.to(room).emit('alert_notification', alertData);
-        this.logger.log(`Odaya (${room}) yeni alarm bildirimi yayınlandı: ${alertData.title}`);
+    async sendAlertNotification(familyId, alertData) {
+        try {
+            const senderId = alertData.senderId || alertData.userId;
+            const guardians = await this.prisma.familyMember.findMany({
+                where: {
+                    familyId,
+                    userId: senderId ? { not: senderId } : undefined,
+                    memberType: 'guardian',
+                },
+                select: {
+                    userId: true,
+                },
+            });
+            for (const guardian of guardians) {
+                this.sendEventToUser(guardian.userId, 'alert_notification', alertData);
+            }
+            this.logger.log(`Aile Grubu (${familyId}) için velilere (${guardians.length} kişi) alarm bildirimi iletildi: ${alertData.title}`);
+        }
+        catch (err) {
+            this.logger.error(`Alarm bildirimi velilere gönderilirken hata oluştu: ${err.message}`);
+        }
     }
     sendEventToUser(userId, event, data) {
         const sockets = this.activeUsers.get(userId);

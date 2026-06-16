@@ -74,6 +74,7 @@ export declare class AdminController {
             name: string;
             createdAt: Date;
             updatedAt: Date;
+            inviteCode: string | null;
             type: string;
             ownerId: string;
         })[];
@@ -133,6 +134,7 @@ export declare class AdminController {
         name: string;
         createdAt: Date;
         updatedAt: Date;
+        inviteCode: string | null;
         type: string;
         ownerId: string;
     }>;

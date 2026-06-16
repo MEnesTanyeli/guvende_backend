@@ -65,6 +65,7 @@ model User {
 
 model Family {
   id          String         @id @default(uuid())
+  inviteCode  String?        @unique
   name        String
   type        String         @default("children")
   ownerId     String

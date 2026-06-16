@@ -1,0 +1,14 @@
+[Unit]
+Description=Guvende Cloudflare Quick Tunnel
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=enes
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate --protocol http2 --url http://127.0.0.1:3001
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

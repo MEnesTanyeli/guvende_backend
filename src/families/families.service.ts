@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+﻿import { ForbiddenException, Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateFamilyDto } from './dto/create-family.dto';
 import { JoinFamilyDto } from './dto/join-family.dto';
@@ -7,10 +7,36 @@ import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class FamiliesService {
+  private readonly inviteCodeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
   constructor(
     private prisma: PrismaService,
     private notificationsService: NotificationsService
   ) {}
+
+  private createInviteCode(length = 8): string {
+    let code = '';
+    for (let i = 0; i < length; i += 1) {
+      code += this.inviteCodeAlphabet[Math.floor(Math.random() * this.inviteCodeAlphabet.length)];
+    }
+    return code;
+  }
+
+  private async generateUniqueInviteCode(tx: any): Promise<string> {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const inviteCode = this.createInviteCode();
+      const existingFamily = await tx.family.findUnique({
+        where: { inviteCode },
+        select: { id: true },
+      });
+
+      if (!existingFamily) {
+        return inviteCode;
+      }
+    }
+
+    throw new ConflictException('Aile davet kodu olusturulamadi. Lutfen tekrar deneyin.');
+  }
 
   async create(userId: string, dto: CreateFamilyDto) {
     const user = await this.prisma.user.findUnique({
@@ -20,7 +46,7 @@ export class FamiliesService {
 
     const isGuardian = user && user.role !== 'child' && user.role !== 'elder';
     if (!isGuardian) {
-      throw new ForbiddenException('Sadece veli hesapları yeni aile grubu oluşturabilir.');
+      throw new ForbiddenException('Sadece veli hesaplarÄ± yeni aile grubu oluÅŸturabilir.');
     }
 
     const duplicateName = await this.prisma.family.findFirst({
@@ -34,7 +60,7 @@ export class FamiliesService {
     });
 
     if (duplicateName) {
-      throw new ConflictException('Aynı isimde birden fazla aile grubu oluşturamazsınız.');
+      throw new ConflictException('AynÄ± isimde birden fazla aile grubu oluÅŸturamazsÄ±nÄ±z.');
     }
 
     const totalMemberships = await this.prisma.familyMember.count({
@@ -45,10 +71,12 @@ export class FamiliesService {
       throw new ForbiddenException('En fazla 2 aile grubunda yer alabilirsiniz.');
     }
 
-    // Aile kaydını oluştur ve oluşturanı otomatik olarak guardian (veli/koruyucu) olarak ekle
+    // Aile kaydÄ±nÄ± oluÅŸtur ve oluÅŸturanÄ± otomatik olarak guardian (veli/koruyucu) olarak ekle
     return this.prisma.$transaction(async (tx) => {
+      const inviteCode = await this.generateUniqueInviteCode(tx);
       const family = await tx.family.create({
         data: {
+          inviteCode,
           name: dto.name,
           type: dto.type || 'general',
           ownerId: userId,
@@ -80,7 +108,7 @@ export class FamiliesService {
   }
 
   async findAll(userId: string) {
-    // Kullanıcının üyesi olduğu tüm aileleri getir
+    // KullanÄ±cÄ±nÄ±n Ã¼yesi olduÄŸu tÃ¼m aileleri getir
     return this.prisma.family.findMany({
       where: {
         members: {
@@ -114,7 +142,7 @@ export class FamiliesService {
   }
 
   async findOne(userId: string, familyId: string) {
-    // Kullanıcının bu aile grubuna üye olup olmadığını doğrula
+    // KullanÄ±cÄ±nÄ±n bu aile grubuna Ã¼ye olup olmadÄ±ÄŸÄ±nÄ± doÄŸrula
     const isMember = await this.prisma.familyMember.findUnique({
       where: {
         familyId_userId: {
@@ -125,7 +153,7 @@ export class FamiliesService {
     });
 
     if (!isMember) {
-      throw new ForbiddenException('Bu aile grubunun verilerine erişim izniniz yok.');
+      throw new ForbiddenException('Bu aile grubunun verilerine eriÅŸim izniniz yok.');
     }
 
     const family = await this.prisma.family.findUnique({
@@ -157,7 +185,7 @@ export class FamiliesService {
     });
 
     if (!family) {
-      throw new NotFoundException('Aile grubu bulunamadı.');
+      throw new NotFoundException('Aile grubu bulunamadÄ±.');
     }
 
     return family;
@@ -175,33 +203,52 @@ export class FamiliesService {
     });
 
     if (!membership) {
-      throw new ForbiddenException('Bu aile grubuna erişim izniniz yok.');
+      throw new ForbiddenException('Bu aile grubuna eriÅŸim izniniz yok.');
     }
 
     if (membership.memberType !== MemberType.guardian) {
-      throw new ForbiddenException('Sadece koruyucu (guardian) üyeler davet kodu oluşturabilir.');
+      throw new ForbiddenException('Sadece koruyucu (guardian) Ã¼yeler davet kodu oluÅŸturabilir.');
+    }
+
+    const family = await this.prisma.family.findUnique({
+      where: { id: familyId },
+      select: { inviteCode: true },
+    });
+
+    if (!family) {
+      throw new NotFoundException('Aile grubu bulunamadi.');
+    }
+
+    let inviteCode = family.inviteCode;
+    if (!inviteCode) {
+      inviteCode = await this.generateUniqueInviteCode(this.prisma);
+      await this.prisma.family.update({
+        where: { id: familyId },
+        data: { inviteCode },
+      });
     }
 
     return {
       familyId,
-      inviteCode: familyId,
-      message: 'Bu kodu diğer üyelerle paylaşarak aileye katılmalarını sağlayabilirsiniz.',
+      inviteCode,
+      message: 'Bu kodu diger uyelerle paylasarak aileye katilmalarini saglayabilirsiniz.',
     };
   }
 
   async join(userId: string, dto: JoinFamilyDto) {
-    const familyIdToSearch = dto.familyId.trim().toLowerCase();
+    const familyIdOrInviteCode = dto.familyId.trim();
+    const inviteCode = familyIdOrInviteCode.toUpperCase();
     const family = await this.prisma.family.findFirst({
       where: {
         OR: [
-          { id: familyIdToSearch },
-          { id: { startsWith: familyIdToSearch } }
-        ]
+          { inviteCode },
+          { id: familyIdOrInviteCode },
+        ],
       },
     });
 
     if (!family) {
-      throw new NotFoundException('Geçersiz aile davet kodu.');
+      throw new NotFoundException('GeÃ§ersiz aile davet kodu.');
     }
 
     const joiningUser = await this.prisma.user.findUnique({
@@ -210,10 +257,10 @@ export class FamiliesService {
     });
 
     if (!joiningUser) {
-      throw new NotFoundException('Kullanıcı bulunamadı.');
+      throw new NotFoundException('KullanÄ±cÄ± bulunamadÄ±.');
     }
 
-    // Üyelik limit kontrolü
+    // Ãœyelik limit kontrolÃ¼
     const currentMembershipsCount = await this.prisma.familyMember.count({
       where: { userId },
     });
@@ -225,7 +272,7 @@ export class FamiliesService {
       }
     } else {
       if (currentMembershipsCount >= 1) {
-        throw new ForbiddenException('Çocuklar veya aile büyükleri sadece 1 aile grubunda yer alabilir.');
+        throw new ForbiddenException('Ã‡ocuklar veya aile bÃ¼yÃ¼kleri sadece 1 aile grubunda yer alabilir.');
       }
     }
 
@@ -239,7 +286,7 @@ export class FamiliesService {
     });
 
     if (existingMember) {
-      throw new ConflictException('Zaten bu aile grubunun bir üyesisiniz.');
+      throw new ConflictException('Zaten bu aile grubunun bir Ã¼yesisiniz.');
     }
 
     const memberTypeToUse = dto.memberType || (joiningUser.role as MemberType) || MemberType.child;
@@ -253,7 +300,7 @@ export class FamiliesService {
       });
 
       if (guardianCount >= 2) {
-        throw new ForbiddenException('Bu aile grubunda zaten maksimum veli (2) sınırına ulaşılmış.');
+        throw new ForbiddenException('Bu aile grubunda zaten maksimum veli (2) sÄ±nÄ±rÄ±na ulaÅŸÄ±lmÄ±ÅŸ.');
       }
     }
 
@@ -275,7 +322,7 @@ export class FamiliesService {
   }
 
   async updateMemberRole(userId: string, familyId: string, targetUserId: string, newRole: string) {
-    // 1. Yetki Kontrolü: İstek yapan kişi bu aile grubunda "guardian" (veli) mi?
+    // 1. Yetki KontrolÃ¼: Ä°stek yapan kiÅŸi bu aile grubunda "guardian" (veli) mi?
     const editorMembership = await this.prisma.familyMember.findUnique({
       where: {
         familyId_userId: {
@@ -286,14 +333,14 @@ export class FamiliesService {
     });
 
     if (!editorMembership) {
-      throw new ForbiddenException('Bu aile grubuna üye değilsiniz.');
+      throw new ForbiddenException('Bu aile grubuna Ã¼ye deÄŸilsiniz.');
     }
 
     if (editorMembership.memberType !== MemberType.guardian) {
-      throw new ForbiddenException('Sadece koruyucu (guardian) üyeler başkalarının rollerini değiştirebilir.');
+      throw new ForbiddenException('Sadece koruyucu (guardian) Ã¼yeler baÅŸkalarÄ±nÄ±n rollerini deÄŸiÅŸtirebilir.');
     }
 
-    // 2. Güncelleme yapılacak üyenin varlığını kontrol et
+    // 2. GÃ¼ncelleme yapÄ±lacak Ã¼yenin varlÄ±ÄŸÄ±nÄ± kontrol et
     const targetMembership = await this.prisma.familyMember.findUnique({
       where: {
         familyId_userId: {
@@ -304,20 +351,20 @@ export class FamiliesService {
     });
 
     if (!targetMembership) {
-      throw new NotFoundException('Güncellenmek istenen aile üyesi grupta bulunamadı.');
+      throw new NotFoundException('GÃ¼ncellenmek istenen aile Ã¼yesi grupta bulunamadÄ±.');
     }
 
-    // Aile sahibinin (owner) rolünü değiştirmeyi engelleyelim (veya grup kurucusunu)
+    // Aile sahibinin (owner) rolÃ¼nÃ¼ deÄŸiÅŸtirmeyi engelleyelim (veya grup kurucusunu)
     const family = await this.prisma.family.findUnique({
       where: { id: familyId }
     });
     if (family && family.ownerId === targetUserId) {
-      throw new ForbiddenException('Grup sahibinin rolü değiştirilemez.');
+      throw new ForbiddenException('Grup sahibinin rolÃ¼ deÄŸiÅŸtirilemez.');
     }
 
-    // 3. Rolü güncelle
+    // 3. RolÃ¼ gÃ¼ncelle
     if (!Object.values(MemberType).includes(newRole as MemberType)) {
-      throw new ConflictException('Geçersiz üye tipi.');
+      throw new ConflictException('GeÃ§ersiz Ã¼ye tipi.');
     }
 
     if (newRole === MemberType.guardian && targetMembership.memberType !== MemberType.guardian) {
@@ -329,7 +376,7 @@ export class FamiliesService {
       });
 
       if (guardianCount >= 2) {
-        throw new ForbiddenException('Bu aile grubunda zaten maksimum veli (2) sınırına ulaşılmış.');
+        throw new ForbiddenException('Bu aile grubunda zaten maksimum veli (2) sÄ±nÄ±rÄ±na ulaÅŸÄ±lmÄ±ÅŸ.');
       }
     }
 
@@ -356,7 +403,7 @@ export class FamiliesService {
     });
   }
 
-  // Aile Grubundan Kendi İsteğiyle Ayrılma
+  // Aile Grubundan Kendi Ä°steÄŸiyle AyrÄ±lma
   async leave(userId: string, familyId: string) {
     const membership = await this.prisma.familyMember.findUnique({
       where: {
@@ -366,7 +413,7 @@ export class FamiliesService {
     });
 
     if (!membership) {
-      throw new NotFoundException('Bu aile grubunun üyesi değilsiniz.');
+      throw new NotFoundException('Bu aile grubunun Ã¼yesi deÄŸilsiniz.');
     }
 
     const family = await this.prisma.family.findUnique({
@@ -375,26 +422,26 @@ export class FamiliesService {
     });
 
     if (!family) {
-      throw new NotFoundException('Aile grubu bulunamadı.');
+      throw new NotFoundException('Aile grubu bulunamadÄ±.');
     }
 
-    // Veli ayrılma kontrolü
+    // Veli ayrÄ±lma kontrolÃ¼
     if (membership.memberType === MemberType.guardian) {
       const guardians = family.members.filter(m => m.memberType === MemberType.guardian);
       
       if (guardians.length === 1) {
-        // Grupta başka veli yoksa grubu tamamen sil/dağıt
+        // Grupta baÅŸka veli yoksa grubu tamamen sil/daÄŸÄ±t
         return this.deleteFamily(userId, familyId);
       }
     }
 
-    // Çocuk veya Yaşlı ise velilere bildirim gönder ve alarm oluştur
+    // Ã‡ocuk veya YaÅŸlÄ± ise velilere bildirim gÃ¶nder ve alarm oluÅŸtur
     if (membership.memberType === MemberType.child || membership.memberType === MemberType.elder) {
       const remainingGuardians = family.members.filter(m => m.memberType === MemberType.guardian && m.userId !== userId);
-      const alertTitle = '🚪 GRUPTAN AYRILMA';
-      const alertMsg = `${membership.user.name} aile grubundan kendi isteğiyle ayrıldı ve konum takibi sonlandırıldı!`;
+      const alertTitle = 'ğŸšª GRUPTAN AYRILMA';
+      const alertMsg = `${membership.user.name} aile grubundan kendi isteÄŸiyle ayrÄ±ldÄ± ve konum takibi sonlandÄ±rÄ±ldÄ±!`;
 
-      // Her veli için veritabanında alarm oluştur
+      // Her veli iÃ§in veritabanÄ±nda alarm oluÅŸtur
       for (const guardian of remainingGuardians) {
         await this.prisma.alert.create({
           data: {
@@ -408,7 +455,7 @@ export class FamiliesService {
         });
       }
 
-      // Kalan velilere push/socket bildirimi gönder
+      // Kalan velilere push/socket bildirimi gÃ¶nder
       await this.notificationsService.sendFamilyNotification(
         familyId,
         userId,
@@ -418,17 +465,17 @@ export class FamiliesService {
       );
     }
 
-    // Üyelik kaydını sil
+    // Ãœyelik kaydÄ±nÄ± sil
     await this.prisma.familyMember.delete({
       where: {
         familyId_userId: { familyId, userId }
       }
     });
 
-    return { success: true, message: 'Aile grubundan başarıyla ayrıldınız.' };
+    return { success: true, message: 'Aile grubundan baÅŸarÄ±yla ayrÄ±ldÄ±nÄ±z.' };
   }
 
-  // Gruptan Üye Çıkarma (Veli Yetkisiyle Kick)
+  // Gruptan Ãœye Ã‡Ä±karma (Veli Yetkisiyle Kick)
   async removeMember(userId: string, familyId: string, targetUserId: string) {
     const editorMembership = await this.prisma.familyMember.findUnique({
       where: {
@@ -437,7 +484,7 @@ export class FamiliesService {
     });
 
     if (!editorMembership || editorMembership.memberType !== MemberType.guardian) {
-      throw new ForbiddenException('Sadece veli (guardian) rolündeki üyeler gruptan üye çıkarabilir.');
+      throw new ForbiddenException('Sadece veli (guardian) rolÃ¼ndeki Ã¼yeler gruptan Ã¼ye Ã§Ä±karabilir.');
     }
 
     const targetMembership = await this.prisma.familyMember.findUnique({
@@ -448,7 +495,7 @@ export class FamiliesService {
     });
 
     if (!targetMembership) {
-      throw new NotFoundException('Çıkarılmak istenen üye bu aile grubunda bulunamadı.');
+      throw new NotFoundException('Ã‡Ä±karÄ±lmak istenen Ã¼ye bu aile grubunda bulunamadÄ±.');
     }
 
     const family = await this.prisma.family.findUnique({
@@ -456,23 +503,23 @@ export class FamiliesService {
     });
 
     if (!family) {
-      throw new NotFoundException('Aile grubu bulunamadı.');
+      throw new NotFoundException('Aile grubu bulunamadÄ±.');
     }
 
     if (family.ownerId === targetUserId) {
-      throw new ForbiddenException('Grup kurucusu/sahibi gruptan çıkarılamaz.');
+      throw new ForbiddenException('Grup kurucusu/sahibi gruptan Ã§Ä±karÄ±lamaz.');
     }
 
     if (userId === targetUserId) {
-      throw new ForbiddenException('Kendinizi gruptan çıkaramazsınız. Gruptan ayrılmak için "Ayrıl" özelliğini kullanın.');
+      throw new ForbiddenException('Kendinizi gruptan Ã§Ä±karamazsÄ±nÄ±z. Gruptan ayrÄ±lmak iÃ§in "AyrÄ±l" Ã¶zelliÄŸini kullanÄ±n.');
     }
 
-    // Çocuk veya Yaşlı çıkarıldıysa velilere alarm/bildirim gönder
+    // Ã‡ocuk veya YaÅŸlÄ± Ã§Ä±karÄ±ldÄ±ysa velilere alarm/bildirim gÃ¶nder
     if (targetMembership.memberType === MemberType.child || targetMembership.memberType === MemberType.elder) {
-      const alertTitle = '🚫 GRUPTAN ÇIKARILDI';
-      const alertMsg = `${targetMembership.user.name}, veli tarafından aile grubundan çıkarıldı ve konum takibi sonlandırıldı!`;
+      const alertTitle = 'ğŸš« GRUPTAN Ã‡IKARILDI';
+      const alertMsg = `${targetMembership.user.name}, veli tarafÄ±ndan aile grubundan Ã§Ä±karÄ±ldÄ± ve konum takibi sonlandÄ±rÄ±ldÄ±!`;
 
-      // Alarmı veritabanına kaydet
+      // AlarmÄ± veritabanÄ±na kaydet
       await this.prisma.alert.create({
         data: {
           familyId,
@@ -484,7 +531,7 @@ export class FamiliesService {
         }
       });
 
-      // Kalan velilere bildirim gönder
+      // Kalan velilere bildirim gÃ¶nder
       await this.notificationsService.sendFamilyNotification(
         familyId,
         targetUserId,
@@ -494,17 +541,17 @@ export class FamiliesService {
       );
     }
 
-    // Üyelik kaydını sil
+    // Ãœyelik kaydÄ±nÄ± sil
     await this.prisma.familyMember.delete({
       where: {
         familyId_userId: { familyId, userId: targetUserId }
       }
     });
 
-    return { success: true, message: 'Üye aile grubundan başarıyla çıkarıldı.' };
+    return { success: true, message: 'Ãœye aile grubundan baÅŸarÄ±yla Ã§Ä±karÄ±ldÄ±.' };
   }
 
-  // Aile Grubunu Tamamen Silme/Dağıtma
+  // Aile Grubunu Tamamen Silme/DaÄŸÄ±tma
   async deleteFamily(userId: string, familyId: string) {
     const membership = await this.prisma.familyMember.findUnique({
       where: {
@@ -513,15 +560,15 @@ export class FamiliesService {
     });
 
     if (!membership || membership.memberType !== MemberType.guardian) {
-      throw new ForbiddenException('Sadece veli (guardian) üyeler grubu silebilir/dağıtabilir.');
+      throw new ForbiddenException('Sadece veli (guardian) Ã¼yeler grubu silebilir/daÄŸÄ±tabilir.');
     }
 
-    // Family tablosundaki kaydı siler, ilişkili üyeler, alarmlar, bölgeler CASCADE ile silinir
+    // Family tablosundaki kaydÄ± siler, iliÅŸkili Ã¼yeler, alarmlar, bÃ¶lgeler CASCADE ile silinir
     await this.prisma.family.delete({
       where: { id: familyId }
     });
 
-    return { success: true, message: 'Aile grubu başarıyla silindi ve dağıtıldı.' };
+    return { success: true, message: 'Aile grubu baÅŸarÄ±yla silindi ve daÄŸÄ±tÄ±ldÄ±.' };
   }
 
   async muteNotifications(userId: string, familyId: string, mute: boolean) {
@@ -535,7 +582,7 @@ export class FamiliesService {
     });
 
     if (!membership) {
-      throw new NotFoundException('Bu aile grubunun üyesi değilsiniz.');
+      throw new NotFoundException('Bu aile grubunun Ã¼yesi deÄŸilsiniz.');
     }
 
     return this.prisma.familyMember.update({

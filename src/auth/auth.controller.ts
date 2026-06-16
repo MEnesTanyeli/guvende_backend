@@ -5,6 +5,7 @@ import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { GetUser } from './decorators/get-user.decorator';
 import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
+import { Throttle } from '@nestjs/throttler';
 
 class ForgotPasswordDto {
   @IsEmail({}, { message: 'Geçerli bir e-posta adresi giriniz.' })
@@ -30,26 +31,31 @@ class ResetPasswordDto {
 export class AuthController {
   constructor(private authService: AuthService) {}
 
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('register')
   async register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
   }
 
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('login')
   async login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
   }
 
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('admin/login')
   async adminLogin(@Body() dto: LoginDto) {
     return this.authService.adminLogin(dto);
   }
 
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
   @Post('forgot-password')
   async forgotPassword(@Body() dto: ForgotPasswordDto) {
     return this.authService.forgotPassword(dto.email);
   }
 
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('reset-password')
   async resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);

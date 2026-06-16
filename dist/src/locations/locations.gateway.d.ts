@@ -49,6 +49,6 @@ export declare class LocationsGateway implements OnGatewayConnection, OnGatewayD
         message: string;
     }>;
     sendLocationUpdate(familyId: string, locationData: any): void;
-    sendAlertNotification(familyId: string, alertData: any): void;
+    sendAlertNotification(familyId: string, alertData: any): Promise<void>;
     sendEventToUser(userId: string, event: string, data: any): boolean;
 }
