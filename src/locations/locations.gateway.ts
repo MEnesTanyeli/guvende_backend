@@ -11,6 +11,7 @@ import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
+import * as https from 'https';
 
 @WebSocketGateway({
   cors: {
@@ -28,6 +29,65 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
     private prisma: PrismaService,
     private jwtService: JwtService,
   ) {}
+
+  private async sendPushNotification(userIds: string[], title: string, message: string, data?: any) {
+    const appId = process.env.ONESIGNAL_APP_ID;
+    const apiKey = process.env.ONESIGNAL_REST_API_KEY;
+
+    if (!appId || !apiKey) {
+      this.logger.warn('OneSignal App ID veya REST API Key eksik. Push bildirim gönderilemedi.');
+      return;
+    }
+
+    if (userIds.length === 0) {
+      return;
+    }
+
+    const payload = {
+      app_id: appId,
+      include_external_user_ids: userIds,
+      headings: { tr: title, en: title },
+      contents: { tr: message, en: message },
+      data: data || {},
+      priority: 10,
+      android_channel_id: 'emergency_channel',
+    };
+
+    const payloadStr = JSON.stringify(payload);
+
+    const options = {
+      hostname: 'onesignal.com',
+      port: 443,
+      path: '/api/v1/notifications',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Authorization': `Basic ${apiKey}`,
+        'Content-Length': Buffer.byteLength(payloadStr),
+      },
+    };
+
+    return new Promise((resolve) => {
+      const req = https.request(options, (res) => {
+        let responseBody = '';
+        res.on('data', (chunk) => {
+          responseBody += chunk;
+        });
+        res.on('end', () => {
+          this.logger.log(`LocationsGateway OneSignal Push Gönderim Sonucu: ${res.statusCode} | Gövde: ${responseBody}`);
+          resolve({ statusCode: res.statusCode, body: responseBody });
+        });
+      });
+
+      req.on('error', (err) => {
+        this.logger.error(`LocationsGateway OneSignal Push Gönderimi Hata Aldı: ${err.message}`);
+        resolve({ error: err.message });
+      });
+
+      req.write(payloadStr);
+      req.end();
+    });
+  }
 
   async handleConnection(client: Socket) {
     try {
@@ -223,10 +283,22 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
       senderId,
     });
 
+    // Her durumda push bildirim gönder (arka planda uykuda olan cihazı uyandırmak için)
+    await this.sendPushNotification(
+      [targetUserId],
+      '🚨 ACİL SESLİ UYARI!',
+      `${sender?.name || 'Veliniz'} size sesli uyarı gönderdi!`,
+      {
+        action: 'play_warning_sound',
+        senderName: sender?.name || 'Veliniz',
+        senderId,
+      }
+    );
+
     if (sent) {
       return { status: 'success', message: 'Sesli uyarı başarıyla gönderildi.' };
     } else {
-      return { status: 'offline', message: 'Üye şu anda çevrimdışı olduğundan sesli uyarı iletilemedi.' };
+      return { status: 'success', message: 'Üye çevrimdışı, ancak sesli uyarı push bildirim olarak gönderildi.' };
     }
   }
 
@@ -283,10 +355,25 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
       senderId,
     });
 
+    // Her durumda cihaz kilitleme/açma durumunu bildirmek için push bildirim gönder
+    await this.sendPushNotification(
+      [targetUserId],
+      lockState ? '🔒 Cihazınız Kilitlendi' : '🔓 Cihazınızın Kilidi Açıldı',
+      lockState
+        ? `${sender?.name || 'Veliniz'} cihazınızı uzaktan kilitledi.`
+        : `${sender?.name || 'Veliniz'} cihazınızın kilidini açtı.`,
+      {
+        action: 'device_lock',
+        lockState,
+        senderName: sender?.name || 'Veliniz',
+        senderId,
+      }
+    );
+
     if (sent) {
       return { status: 'success', message: `Cihaz kilidi durumu başarıyla iletildi.` };
     } else {
-      return { status: 'success', message: 'Üye şu anda çevrimdışı, ancak kilit durumu kaydedildi. İlk bağlantıda uygulanacak.' };
+      return { status: 'success', message: 'Üye şu anda çevrimdışı, ancak kilit durumu kaydedildi ve push bildirim gönderildi.' };
     }
   }
 

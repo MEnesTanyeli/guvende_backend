@@ -1,4 +1,4 @@
-import { IsBoolean, IsNumber, IsOptional, Max, Min } from 'class-validator';
+import { IsBoolean, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class RecordLocationDto {
   @IsNumber({}, { message: 'Enlem (latitude) geçerli bir sayı olmalıdır.' })
@@ -24,4 +24,8 @@ export class RecordLocationDto {
   @IsBoolean()
   @IsOptional()
   isCharging?: boolean;
+
+  @IsString()
+  @IsOptional()
+  connectionStatus?: string;
 }

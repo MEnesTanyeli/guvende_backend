@@ -9,6 +9,7 @@ export declare class LocationsGateway implements OnGatewayConnection, OnGatewayD
     private activeUsers;
     server: Server;
     constructor(prisma: PrismaService, jwtService: JwtService);
+    private sendPushNotification;
     handleConnection(client: Socket): Promise<void>;
     handleDisconnect(client: Socket): Promise<void>;
     private updateUserConnectionStatus;

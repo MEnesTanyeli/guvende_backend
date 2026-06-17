@@ -54,7 +54,7 @@ export class LocationsService {
         speed: dto.speed,
         batteryLevel: dto.batteryLevel,
         isCharging: dto.isCharging ?? false,
-        connectionStatus: 'online',
+        connectionStatus: dto.connectionStatus || 'online',
       },
       include: {
         user: {

@@ -1,10 +1,43 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
 var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
     var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
     if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
@@ -18,6 +51,7 @@ const common_1 = require("@nestjs/common");
 const socket_io_1 = require("socket.io");
 const prisma_service_1 = require("../prisma/prisma.service");
 const jwt_1 = require("@nestjs/jwt");
+const https = __importStar(require("https"));
 let LocationsGateway = class LocationsGateway {
     prisma;
     jwtService;
@@ -27,6 +61,56 @@ let LocationsGateway = class LocationsGateway {
     constructor(prisma, jwtService) {
         this.prisma = prisma;
         this.jwtService = jwtService;
+    }
+    async sendPushNotification(userIds, title, message, data) {
+        const appId = process.env.ONESIGNAL_APP_ID;
+        const apiKey = process.env.ONESIGNAL_REST_API_KEY;
+        if (!appId || !apiKey) {
+            this.logger.warn('OneSignal App ID veya REST API Key eksik. Push bildirim gönderilemedi.');
+            return;
+        }
+        if (userIds.length === 0) {
+            return;
+        }
+        const payload = {
+            app_id: appId,
+            include_external_user_ids: userIds,
+            headings: { tr: title, en: title },
+            contents: { tr: message, en: message },
+            data: data || {},
+            priority: 10,
+            android_channel_id: 'emergency_channel',
+        };
+        const payloadStr = JSON.stringify(payload);
+        const options = {
+            hostname: 'onesignal.com',
+            port: 443,
+            path: '/api/v1/notifications',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json; charset=utf-8',
+                'Authorization': `Basic ${apiKey}`,
+                'Content-Length': Buffer.byteLength(payloadStr),
+            },
+        };
+        return new Promise((resolve) => {
+            const req = https.request(options, (res) => {
+                let responseBody = '';
+                res.on('data', (chunk) => {
+                    responseBody += chunk;
+                });
+                res.on('end', () => {
+                    this.logger.log(`LocationsGateway OneSignal Push Gönderim Sonucu: ${res.statusCode} | Gövde: ${responseBody}`);
+                    resolve({ statusCode: res.statusCode, body: responseBody });
+                });
+            });
+            req.on('error', (err) => {
+                this.logger.error(`LocationsGateway OneSignal Push Gönderimi Hata Aldı: ${err.message}`);
+                resolve({ error: err.message });
+            });
+            req.write(payloadStr);
+            req.end();
+        });
     }
     async handleConnection(client) {
         try {
@@ -190,11 +274,16 @@ let LocationsGateway = class LocationsGateway {
             senderName: sender?.name || 'Veliniz',
             senderId,
         });
+        await this.sendPushNotification([targetUserId], '🚨 ACİL SESLİ UYARI!', `${sender?.name || 'Veliniz'} size sesli uyarı gönderdi!`, {
+            action: 'play_warning_sound',
+            senderName: sender?.name || 'Veliniz',
+            senderId,
+        });
         if (sent) {
             return { status: 'success', message: 'Sesli uyarı başarıyla gönderildi.' };
         }
         else {
-            return { status: 'offline', message: 'Üye şu anda çevrimdışı olduğundan sesli uyarı iletilemedi.' };
+            return { status: 'success', message: 'Üye çevrimdışı, ancak sesli uyarı push bildirim olarak gönderildi.' };
         }
     }
     async handleSendDeviceLock(data, client) {
@@ -236,11 +325,19 @@ let LocationsGateway = class LocationsGateway {
             senderName: sender?.name || 'Veliniz',
             senderId,
         });
+        await this.sendPushNotification([targetUserId], lockState ? '🔒 Cihazınız Kilitlendi' : '🔓 Cihazınızın Kilidi Açıldı', lockState
+            ? `${sender?.name || 'Veliniz'} cihazınızı uzaktan kilitledi.`
+            : `${sender?.name || 'Veliniz'} cihazınızın kilidini açtı.`, {
+            action: 'device_lock',
+            lockState,
+            senderName: sender?.name || 'Veliniz',
+            senderId,
+        });
         if (sent) {
             return { status: 'success', message: `Cihaz kilidi durumu başarıyla iletildi.` };
         }
         else {
-            return { status: 'success', message: 'Üye şu anda çevrimdışı, ancak kilit durumu kaydedildi. İlk bağlantıda uygulanacak.' };
+            return { status: 'success', message: 'Üye şu anda çevrimdışı, ancak kilit durumu kaydedildi ve push bildirim gönderildi.' };
         }
     }
     sendLocationUpdate(familyId, locationData) {
@@ -250,21 +347,24 @@ let LocationsGateway = class LocationsGateway {
     }
     async sendAlertNotification(familyId, alertData) {
         try {
-            const senderId = alertData.senderId || alertData.userId;
+            const senderId = alertData.senderId || alertData.userId || alertData.data?.userId;
             const guardians = await this.prisma.familyMember.findMany({
                 where: {
                     familyId,
-                    userId: senderId ? { not: senderId } : undefined,
                     memberType: 'guardian',
                 },
                 select: {
                     userId: true,
                 },
             });
-            for (const guardian of guardians) {
+            let targetGuardians = guardians;
+            if (senderId) {
+                targetGuardians = guardians.filter(g => g.userId !== senderId);
+            }
+            for (const guardian of targetGuardians) {
                 this.sendEventToUser(guardian.userId, 'alert_notification', alertData);
             }
-            this.logger.log(`Aile Grubu (${familyId}) için velilere (${guardians.length} kişi) alarm bildirimi iletildi: ${alertData.title}`);
+            this.logger.log(`Aile Grubu (${familyId}) için velilere (${targetGuardians.length} kişi) alarm bildirimi iletildi: ${alertData.title}`);
         }
         catch (err) {
             this.logger.error(`Alarm bildirimi velilere gönderilirken hata oluştu: ${err.message}`);

@@ -18,6 +18,7 @@ class RecordLocationDto {
     speed;
     batteryLevel;
     isCharging;
+    connectionStatus;
 }
 exports.RecordLocationDto = RecordLocationDto;
 __decorate([
@@ -50,4 +51,9 @@ __decorate([
     (0, class_validator_1.IsOptional)(),
     __metadata("design:type", Boolean)
 ], RecordLocationDto.prototype, "isCharging", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsOptional)(),
+    __metadata("design:type", String)
+], RecordLocationDto.prototype, "connectionStatus", void 0);
 //# sourceMappingURL=record-location.dto.js.map

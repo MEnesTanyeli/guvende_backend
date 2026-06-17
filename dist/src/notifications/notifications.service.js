@@ -144,7 +144,10 @@ let NotificationsService = class NotificationsService {
             data,
             createdAt: new Date(),
         });
-        const targetUserIds = members.map((member) => member.userId);
+        let targetUserIds = members.map((member) => member.userId);
+        if (senderId) {
+            targetUserIds = targetUserIds.filter(id => id !== senderId);
+        }
         if (targetUserIds.length > 0) {
             await this.sendOneSignalNotification(targetUserIds, title, message, data);
         }
