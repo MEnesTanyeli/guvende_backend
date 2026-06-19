@@ -50,7 +50,6 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
       contents: { tr: message, en: message },
       data: data || {},
       priority: 10,
-      android_channel_id: 'emergency_channel',
     };
 
     const payloadStr = JSON.stringify(payload);
