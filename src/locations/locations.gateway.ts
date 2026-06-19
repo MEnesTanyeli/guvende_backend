@@ -277,10 +277,14 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
       select: { name: true },
     });
 
+    // Soket tetikleme akışını kaldırıyoruz. Alarmlar sadece OneSignal push bildirim yoluyla gidecek.
+    /*
     const sent = this.sendEventToUser(targetUserId, 'audible_warning_trigger', {
       senderName: sender?.name || 'Veliniz',
       senderId,
     });
+    */
+    const sent = false;
 
     // Her durumda push bildirim gönder (arka planda uykuda olan cihazı uyandırmak için)
     await this.sendPushNotification(
