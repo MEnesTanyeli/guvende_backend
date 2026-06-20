@@ -72,6 +72,11 @@ let NotificationsService = class NotificationsService {
             contents: { tr: message, en: message },
             data: data || {},
         };
+        if (data && data.action === 'play_warning_sound') {
+            payload.buttons = [
+                { id: 'mute_warning', text: 'Sustur', icon: '' }
+            ];
+        }
         const payloadStr = JSON.stringify(payload);
         const options = {
             hostname: 'onesignal.com',

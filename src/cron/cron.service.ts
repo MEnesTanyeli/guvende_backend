@@ -277,4 +277,42 @@ export class CronService {
       }
     }
   }
+
+  // 4. Periyodik Konum Pingi (Her 5 dakikada bir çalışır)
+  @Cron('0 */5 * * * *')
+  async handleSilentPingCheck() {
+    this.logger.log('Sessiz konum pingi zamanlanmış görevi başlatılıyor...');
+
+    const sevenMinutesAgo = new Date(Date.now() - 7 * 60 * 1000);
+    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+
+    // Aktif tüm üyeleri bul
+    const activeMembers = await this.prisma.familyMember.findMany({
+      select: { userId: true },
+    });
+
+    const uniqueUserIds = Array.from(new Set(activeMembers.map((m) => m.userId)));
+
+    for (const userId of uniqueUserIds) {
+      // Eğer kullanıcı şu an WebSocket ile bağlıysa ping göndermeye gerek yok
+      if (this.locationsGateway.isUserConnected(userId)) {
+        continue;
+      }
+
+      // Kullanıcının en son konum kaydını al
+      const lastLocation = await this.prisma.location.findFirst({
+        where: { userId },
+        orderBy: { recordedAt: 'desc' },
+      });
+
+      // Eğer son konum 7 ila 15 dakika arasındaysa, hala açık ama hareketsiz olabilir. Ping gönder.
+      if (lastLocation && lastLocation.recordedAt < sevenMinutesAgo && lastLocation.recordedAt > fifteenMinutesAgo) {
+        this.logger.log(`Kullanıcı (${userId}) için sessiz ping bildirimi gönderiliyor...`);
+        await this.locationsGateway.sendSilentPushNotification([userId], {
+          action: 'ping',
+        });
+      }
+    }
+    this.logger.log('Sessiz konum pingi zamanlanmış görevi tamamlandı.');
+  }
 }

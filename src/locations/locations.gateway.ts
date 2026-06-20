@@ -30,6 +30,11 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
     private jwtService: JwtService,
   ) {}
 
+  isUserConnected(userId: string): boolean {
+    const userSockets = this.activeUsers.get(userId);
+    return !!(userSockets && userSockets.size > 0);
+  }
+
   private async sendPushNotification(userIds: string[], title: string, message: string, data?: any) {
     const appId = process.env.ONESIGNAL_APP_ID;
     const apiKey = process.env.ONESIGNAL_REST_API_KEY;
@@ -80,6 +85,63 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
 
       req.on('error', (err) => {
         this.logger.error(`LocationsGateway OneSignal Push Gönderimi Hata Aldı: ${err.message}`);
+        resolve({ error: err.message });
+      });
+
+      req.write(payloadStr);
+      req.end();
+    });
+  }
+
+  async sendSilentPushNotification(userIds: string[], data: any) {
+    const appId = process.env.ONESIGNAL_APP_ID;
+    const apiKey = process.env.ONESIGNAL_REST_API_KEY;
+
+    if (!appId || !apiKey) {
+      this.logger.warn('OneSignal App ID veya REST API Key eksik. Silent push bildirim gönderilemedi.');
+      return;
+    }
+
+    if (userIds.length === 0) {
+      return;
+    }
+
+    const payload = {
+      app_id: appId,
+      include_external_user_ids: userIds,
+      data: data || {},
+      content_available: true, // silent notification wake up
+      priority: 10,
+    };
+
+    const payloadStr = JSON.stringify(payload);
+
+    const options = {
+      hostname: 'onesignal.com',
+      port: 443,
+      path: '/api/v1/notifications',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Authorization': `Basic ${apiKey}`,
+        'Content-Length': Buffer.byteLength(payloadStr),
+      },
+    };
+
+    return new Promise((resolve) => {
+      const req = https.request(options, (res) => {
+        let responseBody = '';
+        res.on('data', (chunk) => {
+          responseBody += chunk;
+        });
+        res.on('end', () => {
+          this.logger.log(`LocationsGateway Silent OneSignal Push Gönderim Sonucu: ${res.statusCode} | Gövde: ${responseBody}`);
+          resolve({ statusCode: res.statusCode, body: responseBody });
+        });
+      });
+
+      req.on('error', (err) => {
+        this.logger.error(`LocationsGateway Silent OneSignal Push Gönderimi Hata Aldı: ${err.message}`);
         resolve({ error: err.message });
       });
 

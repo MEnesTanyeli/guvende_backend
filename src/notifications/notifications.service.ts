@@ -25,13 +25,19 @@ export class NotificationsService {
       return;
     }
 
-    const payload = {
+    const payload: any = {
       app_id: appId,
       include_external_user_ids: userIds,
       headings: { tr: title, en: title },
       contents: { tr: message, en: message },
       data: data || {},
     };
+
+    if (data && data.action === 'play_warning_sound') {
+      payload.buttons = [
+        { id: 'mute_warning', text: 'Sustur', icon: '' }
+      ];
+    }
 
     const payloadStr = JSON.stringify(payload);
 

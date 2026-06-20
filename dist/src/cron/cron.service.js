@@ -216,6 +216,31 @@ let CronService = class CronService {
             }
         }
     }
+    async handleSilentPingCheck() {
+        this.logger.log('Sessiz konum pingi zamanlanmış görevi başlatılıyor...');
+        const sevenMinutesAgo = new Date(Date.now() - 7 * 60 * 1000);
+        const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+        const activeMembers = await this.prisma.familyMember.findMany({
+            select: { userId: true },
+        });
+        const uniqueUserIds = Array.from(new Set(activeMembers.map((m) => m.userId)));
+        for (const userId of uniqueUserIds) {
+            if (this.locationsGateway.isUserConnected(userId)) {
+                continue;
+            }
+            const lastLocation = await this.prisma.location.findFirst({
+                where: { userId },
+                orderBy: { recordedAt: 'desc' },
+            });
+            if (lastLocation && lastLocation.recordedAt < sevenMinutesAgo && lastLocation.recordedAt > fifteenMinutesAgo) {
+                this.logger.log(`Kullanıcı (${userId}) için sessiz ping bildirimi gönderiliyor...`);
+                await this.locationsGateway.sendSilentPushNotification([userId], {
+                    action: 'ping',
+                });
+            }
+        }
+        this.logger.log('Sessiz konum pingi zamanlanmış görevi tamamlandı.');
+    }
 };
 exports.CronService = CronService;
 __decorate([
@@ -236,6 +261,12 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", Promise)
 ], CronService.prototype, "handleMedicationReminderCheck", null);
+__decorate([
+    (0, schedule_1.Cron)('0 */5 * * * *'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", Promise)
+], CronService.prototype, "handleSilentPingCheck", null);
 exports.CronService = CronService = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
