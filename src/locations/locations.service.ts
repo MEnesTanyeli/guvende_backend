@@ -439,5 +439,22 @@ export class LocationsService {
 
     return { success: true, message: 'Sesli uyarı push bildirim olarak gönderildi.' };
   }
+
+  async ackAudibleWarning(childId: string, senderId: string, action: 'received' | 'muted') {
+    const child = await this.prisma.user.findUnique({
+      where: { id: childId },
+      select: { name: true },
+    });
+
+    // Veliye (senderId) soket üzerinden uyarının durumunu bildir
+    this.locationsGateway.sendEventToUser(senderId, 'audible_warning_status', {
+      childId,
+      childName: child?.name || 'Çocuğunuz',
+      status: action, // 'received' veya 'muted'
+      deliveredAt: new Date(),
+    });
+
+    return { success: true };
+  }
 }
 

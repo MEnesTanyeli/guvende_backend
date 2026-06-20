@@ -332,6 +332,19 @@ let LocationsService = class LocationsService {
         });
         return { success: true, message: 'Sesli uyarı push bildirim olarak gönderildi.' };
     }
+    async ackAudibleWarning(childId, senderId, action) {
+        const child = await this.prisma.user.findUnique({
+            where: { id: childId },
+            select: { name: true },
+        });
+        this.locationsGateway.sendEventToUser(senderId, 'audible_warning_status', {
+            childId,
+            childName: child?.name || 'Çocuğunuz',
+            status: action,
+            deliveredAt: new Date(),
+        });
+        return { success: true };
+    }
 };
 exports.LocationsService = LocationsService;
 exports.LocationsService = LocationsService = __decorate([

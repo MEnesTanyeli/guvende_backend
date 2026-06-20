@@ -36,6 +36,9 @@ let LocationsController = class LocationsController {
     async sendAudibleWarning(senderId, targetUserId) {
         return this.locationsService.sendAudibleWarning(senderId, targetUserId);
     }
+    async ackAudibleWarning(childId, senderId, action) {
+        return this.locationsService.ackAudibleWarning(childId, senderId, action);
+    }
 };
 exports.LocationsController = LocationsController;
 __decorate([
@@ -72,6 +75,15 @@ __decorate([
     __metadata("design:paramtypes", [String, String]),
     __metadata("design:returntype", Promise)
 ], LocationsController.prototype, "sendAudibleWarning", null);
+__decorate([
+    (0, common_1.Post)('locations/audible-warning/ack'),
+    __param(0, (0, get_user_decorator_1.GetUser)('id')),
+    __param(1, (0, common_1.Body)('senderId')),
+    __param(2, (0, common_1.Body)('action')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String]),
+    __metadata("design:returntype", Promise)
+], LocationsController.prototype, "ackAudibleWarning", null);
 exports.LocationsController = LocationsController = __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard, subscription_guard_1.SubscriptionGuard),
     (0, common_1.Controller)(),
