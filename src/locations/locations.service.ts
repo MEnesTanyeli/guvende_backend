@@ -395,4 +395,49 @@ export class LocationsService {
       },
     });
   }
+
+  async sendAudibleWarning(senderId: string, targetUserId: string) {
+    if (!targetUserId) {
+      throw new NotFoundException('Hedef kullanıcı belirtilmedi.');
+    }
+
+    // Yetki kontrolü: Gönderen kişi hedef kişinin bulunduğu bir grupta "veli" mi?
+    const isAuthorized = await this.prisma.familyMember.findFirst({
+      where: {
+        userId: senderId,
+        memberType: MemberType.guardian,
+        family: {
+          members: {
+            some: {
+              userId: targetUserId,
+            },
+          },
+        },
+      },
+    });
+
+    if (!isAuthorized) {
+      throw new ForbiddenException('Bu üyeye sesli uyarı gönderme yetkiniz yok.');
+    }
+
+    const sender = await this.prisma.user.findUnique({
+      where: { id: senderId },
+      select: { name: true },
+    });
+
+    // Sadece OneSignal üzerinden push bildirim gönder
+    await this.notificationsService.sendOneSignalNotification(
+      [targetUserId],
+      '🚨 ACİL SESLİ UYARI!',
+      `${sender?.name || 'Veliniz'} size sesli uyarı gönderdi!`,
+      {
+        action: 'play_warning_sound',
+        senderName: sender?.name || 'Veliniz',
+        senderId,
+      }
+    );
+
+    return { success: true, message: 'Sesli uyarı push bildirim olarak gönderildi.' };
+  }
 }
+

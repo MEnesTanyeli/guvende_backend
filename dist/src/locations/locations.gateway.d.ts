@@ -36,12 +36,6 @@ export declare class LocationsGateway implements OnGatewayConnection, OnGatewayD
         room: string;
         message?: undefined;
     }>;
-    handleSendAudibleWarning(data: {
-        targetUserId: string;
-    }, client: Socket): Promise<{
-        status: string;
-        message: string;
-    }>;
     handleSendDeviceLock(data: {
         targetUserId: string;
         lockState: boolean;

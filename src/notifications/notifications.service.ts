@@ -12,7 +12,7 @@ export class NotificationsService {
     private locationsGateway: LocationsGateway,
   ) {}
 
-  private async sendOneSignalNotification(userIds: string[], title: string, message: string, data?: any) {
+  async sendOneSignalNotification(userIds: string[], title: string, message: string, data?: any) {
     const appId = process.env.ONESIGNAL_APP_ID;
     const apiKey = process.env.ONESIGNAL_REST_API_KEY;
 

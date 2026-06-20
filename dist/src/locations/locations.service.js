@@ -301,6 +301,37 @@ let LocationsService = class LocationsService {
             },
         });
     }
+    async sendAudibleWarning(senderId, targetUserId) {
+        if (!targetUserId) {
+            throw new common_1.NotFoundException('Hedef kullanıcı belirtilmedi.');
+        }
+        const isAuthorized = await this.prisma.familyMember.findFirst({
+            where: {
+                userId: senderId,
+                memberType: client_1.MemberType.guardian,
+                family: {
+                    members: {
+                        some: {
+                            userId: targetUserId,
+                        },
+                    },
+                },
+            },
+        });
+        if (!isAuthorized) {
+            throw new common_1.ForbiddenException('Bu üyeye sesli uyarı gönderme yetkiniz yok.');
+        }
+        const sender = await this.prisma.user.findUnique({
+            where: { id: senderId },
+            select: { name: true },
+        });
+        await this.notificationsService.sendOneSignalNotification([targetUserId], '🚨 ACİL SESLİ UYARI!', `${sender?.name || 'Veliniz'} size sesli uyarı gönderdi!`, {
+            action: 'play_warning_sound',
+            senderName: sender?.name || 'Veliniz',
+            senderId,
+        });
+        return { success: true, message: 'Sesli uyarı push bildirim olarak gönderildi.' };
+    }
 };
 exports.LocationsService = LocationsService;
 exports.LocationsService = LocationsService = __decorate([

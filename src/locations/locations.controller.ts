@@ -32,4 +32,12 @@ export class LocationsController {
   ) {
     return this.locationsService.getLocationsHistory(userId, familyId, targetUserId, dateStr);
   }
+
+  @Post('locations/audible-warning')
+  async sendAudibleWarning(
+    @GetUser('id') senderId: string,
+    @Body('targetUserId') targetUserId: string,
+  ) {
+    return this.locationsService.sendAudibleWarning(senderId, targetUserId);
+  }
 }

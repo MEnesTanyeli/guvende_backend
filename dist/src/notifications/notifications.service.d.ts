@@ -5,7 +5,7 @@ export declare class NotificationsService {
     private locationsGateway;
     private readonly logger;
     constructor(prisma: PrismaService, locationsGateway: LocationsGateway);
-    private sendOneSignalNotification;
+    sendOneSignalNotification(userIds: string[], title: string, message: string, data?: any): Promise<unknown>;
     sendNotification(userId: string, title: string, message: string, data?: any): Promise<{
         success: boolean;
         userId: string;
