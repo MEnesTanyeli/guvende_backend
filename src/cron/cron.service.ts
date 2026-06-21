@@ -68,6 +68,15 @@ export class CronService {
 
       // Eğer en son konum kaydı varsa ve son konum kaydı 10 dakikadan daha eski ise
       if (lastLocation && lastLocation.recordedAt < tenMinutesAgo) {
+        // Cihazın veritabanındaki durumunu çevrimdışına çek (stale connection temizliği)
+        if (lastLocation.connectionStatus !== 'offline') {
+          await this.prisma.location.update({
+            where: { id: lastLocation.id },
+            data: { connectionStatus: 'offline' },
+          });
+          this.logger.log(`Kullanıcı (${userName} - ${userId}) cihazı uzun süredir konum göndermediği için çevrimdışı durumuna güncellendi.`);
+        }
+
         // Zaten aktif/çözülmemiş bir bağlantı koptu uyarısı var mı?
         const activeAlert = await this.prisma.alert.findFirst({
           where: {
