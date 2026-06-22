@@ -62,6 +62,10 @@ let LocationsGateway = class LocationsGateway {
         this.prisma = prisma;
         this.jwtService = jwtService;
     }
+    isUserConnected(userId) {
+        const userSockets = this.activeUsers.get(userId);
+        return !!(userSockets && userSockets.size > 0);
+    }
     async sendPushNotification(userIds, title, message, data) {
         const appId = process.env.ONESIGNAL_APP_ID;
         const apiKey = process.env.ONESIGNAL_REST_API_KEY;
@@ -79,7 +83,6 @@ let LocationsGateway = class LocationsGateway {
             contents: { tr: message, en: message },
             data: data || {},
             priority: 10,
-            android_channel_id: 'emergency_channel',
         };
         const payloadStr = JSON.stringify(payload);
         const options = {
@@ -106,6 +109,54 @@ let LocationsGateway = class LocationsGateway {
             });
             req.on('error', (err) => {
                 this.logger.error(`LocationsGateway OneSignal Push Gönderimi Hata Aldı: ${err.message}`);
+                resolve({ error: err.message });
+            });
+            req.write(payloadStr);
+            req.end();
+        });
+    }
+    async sendSilentPushNotification(userIds, data) {
+        const appId = process.env.ONESIGNAL_APP_ID;
+        const apiKey = process.env.ONESIGNAL_REST_API_KEY;
+        if (!appId || !apiKey) {
+            this.logger.warn('OneSignal App ID veya REST API Key eksik. Silent push bildirim gönderilemedi.');
+            return;
+        }
+        if (userIds.length === 0) {
+            return;
+        }
+        const payload = {
+            app_id: appId,
+            include_external_user_ids: userIds,
+            data: data || {},
+            content_available: true,
+            priority: 10,
+        };
+        const payloadStr = JSON.stringify(payload);
+        const options = {
+            hostname: 'onesignal.com',
+            port: 443,
+            path: '/api/v1/notifications',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json; charset=utf-8',
+                'Authorization': `Basic ${apiKey}`,
+                'Content-Length': Buffer.byteLength(payloadStr),
+            },
+        };
+        return new Promise((resolve) => {
+            const req = https.request(options, (res) => {
+                let responseBody = '';
+                res.on('data', (chunk) => {
+                    responseBody += chunk;
+                });
+                res.on('end', () => {
+                    this.logger.log(`LocationsGateway Silent OneSignal Push Gönderim Sonucu: ${res.statusCode} | Gövde: ${responseBody}`);
+                    resolve({ statusCode: res.statusCode, body: responseBody });
+                });
+            });
+            req.on('error', (err) => {
+                this.logger.error(`LocationsGateway Silent OneSignal Push Gönderimi Hata Aldı: ${err.message}`);
                 resolve({ error: err.message });
             });
             req.write(payloadStr);
@@ -240,52 +291,6 @@ let LocationsGateway = class LocationsGateway {
         this.logger.log(`İstemci (${client.id} - ${userId}), odadan ayrıldı: ${room}`);
         return { status: 'success', room };
     }
-    async handleSendAudibleWarning(data, client) {
-        const senderId = client.data.userId;
-        if (!senderId) {
-            return { status: 'error', message: 'Yetkisiz erişim.' };
-        }
-        const targetUserId = data.targetUserId;
-        if (!targetUserId) {
-            return { status: 'error', message: 'Hedef kullanıcı belirtilmedi.' };
-        }
-        const isAuthorized = await this.prisma.familyMember.findFirst({
-            where: {
-                userId: senderId,
-                memberType: 'guardian',
-                family: {
-                    members: {
-                        some: {
-                            userId: targetUserId,
-                        },
-                    },
-                },
-            },
-        });
-        if (!isAuthorized) {
-            this.logger.warn(`Kullanıcı (${senderId}) yetkisi olmadan üye (${targetUserId}) için sesli uyarı göndermeye çalıştı.`);
-            return { status: 'error', message: 'Bu üyeye sesli uyarı gönderme yetkiniz yok.' };
-        }
-        const sender = await this.prisma.user.findUnique({
-            where: { id: senderId },
-            select: { name: true },
-        });
-        const sent = this.sendEventToUser(targetUserId, 'audible_warning_trigger', {
-            senderName: sender?.name || 'Veliniz',
-            senderId,
-        });
-        await this.sendPushNotification([targetUserId], '🚨 ACİL SESLİ UYARI!', `${sender?.name || 'Veliniz'} size sesli uyarı gönderdi!`, {
-            action: 'play_warning_sound',
-            senderName: sender?.name || 'Veliniz',
-            senderId,
-        });
-        if (sent) {
-            return { status: 'success', message: 'Sesli uyarı başarıyla gönderildi.' };
-        }
-        else {
-            return { status: 'success', message: 'Üye çevrimdışı, ancak sesli uyarı push bildirim olarak gönderildi.' };
-        }
-    }
     async handleSendDeviceLock(data, client) {
         const senderId = client.data.userId;
         if (!senderId) {
@@ -404,14 +409,6 @@ __decorate([
     __metadata("design:paramtypes", [Object, socket_io_1.Socket]),
     __metadata("design:returntype", Promise)
 ], LocationsGateway.prototype, "handleLeaveFamily", null);
-__decorate([
-    (0, websockets_1.SubscribeMessage)('sendAudibleWarning'),
-    __param(0, (0, websockets_1.MessageBody)()),
-    __param(1, (0, websockets_1.ConnectedSocket)()),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, socket_io_1.Socket]),
-    __metadata("design:returntype", Promise)
-], LocationsGateway.prototype, "handleSendAudibleWarning", null);
 __decorate([
     (0, websockets_1.SubscribeMessage)('sendDeviceLock'),
     __param(0, (0, websockets_1.MessageBody)()),

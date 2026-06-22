@@ -53,4 +53,11 @@ export declare class LocationsService {
         batteryLevel: number | null;
         recordedAt: Date;
     }[]>;
+    sendAudibleWarning(senderId: string, targetUserId: string): Promise<{
+        success: boolean;
+        message: string;
+    }>;
+    ackAudibleWarning(childId: string, senderId: string, action: 'received' | 'muted'): Promise<{
+        success: boolean;
+    }>;
 }

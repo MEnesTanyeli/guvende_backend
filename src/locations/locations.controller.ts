@@ -32,4 +32,21 @@ export class LocationsController {
   ) {
     return this.locationsService.getLocationsHistory(userId, familyId, targetUserId, dateStr);
   }
+
+  @Post('locations/audible-warning')
+  async sendAudibleWarning(
+    @GetUser('id') senderId: string,
+    @Body('targetUserId') targetUserId: string,
+  ) {
+    return this.locationsService.sendAudibleWarning(senderId, targetUserId);
+  }
+
+  @Post('locations/audible-warning/ack')
+  async ackAudibleWarning(
+    @GetUser('id') childId: string,
+    @Body('senderId') senderId: string,
+    @Body('action') action: 'received' | 'muted',
+  ) {
+    return this.locationsService.ackAudibleWarning(childId, senderId, action);
+  }
 }

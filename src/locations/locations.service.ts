@@ -395,4 +395,66 @@ export class LocationsService {
       },
     });
   }
+
+  async sendAudibleWarning(senderId: string, targetUserId: string) {
+    if (!targetUserId) {
+      throw new NotFoundException('Hedef kullanıcı belirtilmedi.');
+    }
+
+    // Yetki kontrolü: Gönderen kişi hedef kişinin bulunduğu bir grupta "veli" mi?
+    const isAuthorized = await this.prisma.familyMember.findFirst({
+      where: {
+        userId: senderId,
+        memberType: MemberType.guardian,
+        family: {
+          members: {
+            some: {
+              userId: targetUserId,
+            },
+          },
+        },
+      },
+    });
+
+    if (!isAuthorized) {
+      throw new ForbiddenException('Bu üyeye sesli uyarı gönderme yetkiniz yok.');
+    }
+
+    const sender = await this.prisma.user.findUnique({
+      where: { id: senderId },
+      select: { name: true },
+    });
+
+    // Sadece OneSignal üzerinden push bildirim gönder
+    await this.notificationsService.sendOneSignalNotification(
+      [targetUserId],
+      '🚨 ACİL SESLİ UYARI!',
+      `${sender?.name || 'Veliniz'} size sesli uyarı gönderdi!`,
+      {
+        action: 'play_warning_sound',
+        senderName: sender?.name || 'Veliniz',
+        senderId,
+      }
+    );
+
+    return { success: true, message: 'Sesli uyarı push bildirim olarak gönderildi.' };
+  }
+
+  async ackAudibleWarning(childId: string, senderId: string, action: 'received' | 'muted') {
+    const child = await this.prisma.user.findUnique({
+      where: { id: childId },
+      select: { name: true },
+    });
+
+    // Veliye (senderId) soket üzerinden uyarının durumunu bildir
+    this.locationsGateway.sendEventToUser(senderId, 'audible_warning_status', {
+      childId,
+      childName: child?.name || 'Çocuğunuz',
+      status: action, // 'received' veya 'muted'
+      deliveredAt: new Date(),
+    });
+
+    return { success: true };
+  }
 }
+
