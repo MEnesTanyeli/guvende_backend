@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { GetUser } from '../auth/decorators/get-user.decorator';
@@ -73,5 +73,10 @@ export class UsersController {
   @Post('confirm-email-change')
   async confirmEmailChange(@GetUser('id') userId: string, @Body() dto: ConfirmEmailChangeDto) {
     return this.usersService.confirmEmailChange(userId, dto.code);
+  }
+
+  @Post(':id/reset-device')
+  async resetDevice(@GetUser('id') guardianId: string, @Param('id') childId: string) {
+    return this.usersService.resetDevice(guardianId, childId);
   }
 }

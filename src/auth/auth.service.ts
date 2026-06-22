@@ -70,6 +70,39 @@ export class AuthService {
       throw new UnauthorizedException('E-posta veya şifre hatalı.');
     }
 
+    // Cihaz Kilitleme Mantığı (Sadece child ve elder rolleri için)
+    if (user.role === 'child' || user.role === 'elder') {
+      if (!dto.deviceId) {
+        throw new BadRequestException('Bu hesap için cihaz kimliği doğrulaması gereklidir.');
+      }
+
+      if (!user.deviceId) {
+        // İlk giriş: cihaz kimliğini kaydet
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: {
+            deviceId: dto.deviceId,
+            loginAllowed: false,
+          },
+        });
+      } else if (user.deviceId !== dto.deviceId) {
+        // Farklı cihazdan giriş denemesi
+        if (user.loginAllowed) {
+          // Velisi izin vermişse yeni cihaza kilitliyoruz
+          await this.prisma.user.update({
+            where: { id: user.id },
+            data: {
+              deviceId: dto.deviceId,
+              loginAllowed: false,
+            },
+          });
+        } else {
+          // Veli izni yok ve cihaz farklı
+          throw new UnauthorizedException('Bu hesap başka bir cihaza kilitlenmiştir. Yeni cihazdan giriş yapmak için velinizin onay vermesi gerekmektedir.');
+        }
+      }
+    }
+
     const token = this.generateToken(user.id, user.email);
     const userProfile = await this.usersService.findOne(user.id);
 

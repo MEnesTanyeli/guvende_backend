@@ -297,4 +297,51 @@ export class UsersService {
 
     return this.findOne(userId);
   }
+
+  async resetDevice(guardianId: string, childId: string) {
+    const child = await this.prisma.user.findUnique({
+      where: { id: childId },
+    });
+
+    if (!child) {
+      throw new NotFoundException('Kullanıcı bulunamadı.');
+    }
+
+    const guardian = await this.prisma.user.findUnique({
+      where: { id: guardianId },
+    });
+
+    if (!guardian || guardian.role === 'child' || guardian.role === 'elder') {
+      throw new ForbiddenException('Bu işlemi yapmaya yetkiniz yoktur.');
+    }
+
+    const membership = await this.prisma.familyMember.findFirst({
+      where: {
+        userId: childId,
+        family: {
+          members: {
+            some: {
+              userId: guardianId,
+            },
+          },
+        },
+      },
+    });
+
+    if (!membership) {
+      throw new ForbiddenException('Bu kullanıcı sizin ailenizde bulunmuyor.');
+    }
+
+    await this.prisma.user.update({
+      where: { id: childId },
+      data: {
+        deviceId: null,
+        loginAllowed: true,
+      },
+    });
+
+    return {
+      message: 'Cihaz kilidi başarıyla kaldırıldı. Yeni cihazla giriş yapılabilir.',
+    };
+  }
 }
