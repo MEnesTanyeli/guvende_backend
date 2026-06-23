@@ -304,74 +304,7 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
     @MessageBody() data: { targetUserId: string; lockState: boolean },
     @ConnectedSocket() client: Socket,
   ) {
-    const senderId = client.data.userId;
-    if (!senderId) {
-      return { status: 'error', message: 'Yetkisiz erişim.' };
-    }
-
-    const { targetUserId, lockState } = data;
-    if (!targetUserId) {
-      return { status: 'error', message: 'Hedef kullanıcı belirtilmedi.' };
-    }
-
-    // Yetki kontrolü: Gönderen kişi hedef kişinin bulunduğu bir grupta "veli" mi?
-    const isAuthorized = await this.prisma.familyMember.findFirst({
-      where: {
-        userId: senderId,
-        memberType: 'guardian',
-        family: {
-          members: {
-            some: {
-              userId: targetUserId,
-            },
-          },
-        },
-      },
-    });
-
-    if (!isAuthorized) {
-      this.logger.warn(`Kullanıcı (${senderId}) yetkisi olmadan üye (${targetUserId}) için cihaz kilidi sinyali göndermeye çalıştı.`);
-      return { status: 'error', message: 'Bu üyeye cihaz kilidi sinyali gönderme yetkiniz yok.' };
-    }
-
-    // Veritabanındaki kilitleme durumunu güncelle
-    await this.prisma.user.update({
-      where: { id: targetUserId },
-      data: { isLocked: lockState }
-    });
-
-    const sender = await this.prisma.user.findUnique({
-      where: { id: senderId },
-      select: { name: true },
-    });
-
-    // Canlı WebSocket kilitleme sinyalini ilet
-    const sent = this.sendEventToUser(targetUserId, 'device_lock_trigger', {
-      lockState,
-      senderName: sender?.name || 'Veliniz',
-      senderId,
-    });
-
-    // Her durumda cihaz kilitleme/açma durumunu bildirmek için push bildirim gönder
-    await this.sendPushNotification(
-      [targetUserId],
-      lockState ? '🔒 Cihazınız Kilitlendi' : '🔓 Cihazınızın Kilidi Açıldı',
-      lockState
-        ? `${sender?.name || 'Veliniz'} cihazınızı uzaktan kilitledi.`
-        : `${sender?.name || 'Veliniz'} cihazınızın kilidini açtı.`,
-      {
-        action: 'device_lock',
-        lockState,
-        senderName: sender?.name || 'Veliniz',
-        senderId,
-      }
-    );
-
-    if (sent) {
-      return { status: 'success', message: `Cihaz kilidi durumu başarıyla iletildi.` };
-    } else {
-      return { status: 'success', message: 'Üye şu anda çevrimdışı, ancak kilit durumu kaydedildi ve push bildirim gönderildi.' };
-    }
+    return { status: 'error', message: 'Cihaz kilitleme özelliği devre dışı bırakılmıştır.' };
   }
 
   // Aile odasına konum güncellemesini yayınlar
