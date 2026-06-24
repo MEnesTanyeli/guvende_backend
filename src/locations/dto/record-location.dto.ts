@@ -28,4 +28,8 @@ export class RecordLocationDto {
   @IsString()
   @IsOptional()
   connectionStatus?: string;
+
+  @IsString()
+  @IsOptional()
+  recordedAt?: string;
 }
