@@ -84,6 +84,7 @@ export class UsersService {
       isProxy,
       proxy: user.proxy ? { id: user.proxy.id, email: user.proxy.email, name: user.proxy.name } : null,
       isLocked: user.isLocked,
+      devicePermissions: user.devicePermissions,
       createdAt: user.createdAt,
     };
   }
@@ -343,5 +344,13 @@ export class UsersService {
     return {
       message: 'Cihaz kilidi başarıyla kaldırıldı. Yeni cihazla giriş yapılabilir.',
     };
+  }
+
+  async updateDevicePermissions(userId: string, permissions: any) {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { devicePermissions: permissions },
+    });
+    return { success: true };
   }
 }

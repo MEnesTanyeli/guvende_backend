@@ -61,6 +61,7 @@ model User {
   emailChangeOtpCode       String?
   emailChangeNewEmail      String?
   emailChangeOtpExpiresAt  DateTime?
+  devicePermissions        Json?
 
   @@map("users")
 }

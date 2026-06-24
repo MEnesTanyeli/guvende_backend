@@ -1,4 +1,4 @@
-﻿import { ForbiddenException, Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateFamilyDto } from './dto/create-family.dto';
 import { JoinFamilyDto } from './dto/join-family.dto';
@@ -176,6 +176,7 @@ export class FamiliesService {
                 phone: true,
                 gender: true,
                 isLocked: true,
+                devicePermissions: true,
               },
             },
           },

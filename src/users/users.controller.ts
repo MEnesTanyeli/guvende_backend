@@ -79,4 +79,9 @@ export class UsersController {
   async resetDevice(@GetUser('id') guardianId: string, @Param('id') childId: string) {
     return this.usersService.resetDevice(guardianId, childId);
   }
+
+  @Patch('device-permissions')
+  async updateDevicePermissions(@GetUser('id') userId: string, @Body() dto: any) {
+    return this.usersService.updateDevicePermissions(userId, dto);
+  }
 }
