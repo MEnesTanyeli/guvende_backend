@@ -58,6 +58,7 @@ let LocationsService = class LocationsService {
                 batteryLevel: dto.batteryLevel,
                 isCharging: dto.isCharging ?? false,
                 connectionStatus: dto.connectionStatus || 'online',
+                recordedAt: dto.recordedAt ? new Date(dto.recordedAt) : new Date(),
             },
             include: {
                 user: {

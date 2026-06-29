@@ -68,40 +68,6 @@ export declare class FamiliesController {
         muteNotifications: boolean;
     }>;
     findOne(userId: string, id: string): Promise<{
-        owner: {
-            id: string;
-            email: string;
-            name: string;
-        };
-        members: ({
-            user: {
-                id: string;
-                email: string;
-                name: string;
-                phone: string | null;
-                gender: string | null;
-                isLocked: boolean;
-            };
-        } & {
-            id: string;
-            createdAt: Date;
-            familyId: string;
-            userId: string;
-            memberType: import(".prisma/client").$Enums.MemberType;
-            permissions: string[];
-            muteNotifications: boolean;
-        })[];
-        safeZones: {
-            id: string;
-            name: string;
-            createdAt: Date;
-            familyId: string;
-            latitude: number;
-            longitude: number;
-            radius: number;
-            createdBy: string;
-        }[];
-    } & {
         id: string;
         name: string;
         createdAt: Date;

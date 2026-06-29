@@ -441,19 +441,61 @@ export class LocationsService {
     return { success: true, message: 'Sesli uyarı push bildirim olarak gönderildi.' };
   }
 
-  async ackAudibleWarning(childId: string, senderId: string, action: 'received' | 'muted') {
+  async ackAudibleWarning(childId: string, senderId: string, action: 'received' | 'muted' | 'unanswered') {
     const child = await this.prisma.user.findUnique({
       where: { id: childId },
       select: { name: true },
+    });
+
+    // İkisinin de içinde bulunduğu ortak aile grubunu bulalım
+    const sharedMembership = await this.prisma.familyMember.findFirst({
+      where: {
+        userId: childId,
+        family: {
+          members: {
+            some: {
+              userId: senderId,
+            },
+          },
+        },
+      },
+      select: {
+        familyId: true,
+      },
     });
 
     // Veliye (senderId) soket üzerinden uyarının durumunu bildir
     this.locationsGateway.sendEventToUser(senderId, 'audible_warning_status', {
       childId,
       childName: child?.name || 'Çocuğunuz',
-      status: action, // 'received' veya 'muted'
+      status: action, // 'received', 'muted' veya 'unanswered'
       deliveredAt: new Date(),
     });
+
+    if (action === 'unanswered' && sharedMembership) {
+      const alertTitle = '⚠️ Sesli Uyarı Yanıtsız Kaldı!';
+      const alertMsg = `${child?.name || 'Çocuğunuz'} gönderilen acil sesli uyarıyı 60 saniye boyunca kapatmadı! Acil durum olabilir.`;
+
+      await this.prisma.alert.create({
+        data: {
+          familyId: sharedMembership.familyId,
+          userId: childId,
+          type: 'sos',
+          title: alertTitle,
+          message: alertMsg,
+          metadata: { senderId },
+        },
+      });
+
+      // Ailedeki tüm velilere push bildirim gönder
+      await this.notificationsService.sendFamilyNotification(
+        sharedMembership.familyId,
+        childId,
+        alertTitle,
+        alertMsg,
+        { action: 'audible_warning_unanswered', childId }
+      );
+    }
 
     return { success: true };
   }

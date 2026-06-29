@@ -12,4 +12,5 @@ export declare class CronService {
     handleInactivityCheck(): Promise<void>;
     handleMedicationReminderCheck(): Promise<void>;
     handleSilentPingCheck(): Promise<void>;
+    handleLocationsCleanup(): Promise<void>;
 }

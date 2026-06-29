@@ -103,6 +103,34 @@ let AuthService = class AuthService {
         if (!isPasswordValid) {
             throw new common_1.UnauthorizedException('E-posta veya şifre hatalı.');
         }
+        if (user.role === 'child' || user.role === 'elder') {
+            if (!dto.deviceId) {
+                throw new common_1.BadRequestException('Bu hesap için cihaz kimliği doğrulaması gereklidir.');
+            }
+            if (!user.deviceId) {
+                await this.prisma.user.update({
+                    where: { id: user.id },
+                    data: {
+                        deviceId: dto.deviceId,
+                        loginAllowed: false,
+                    },
+                });
+            }
+            else if (user.deviceId !== dto.deviceId) {
+                if (user.loginAllowed) {
+                    await this.prisma.user.update({
+                        where: { id: user.id },
+                        data: {
+                            deviceId: dto.deviceId,
+                            loginAllowed: false,
+                        },
+                    });
+                }
+                else {
+                    throw new common_1.UnauthorizedException('Bu hesap başka bir cihaza kilitlenmiştir. Yeni cihazdan giriş yapmak için velinizin onay vermesi gerekmektedir.');
+                }
+            }
+        }
         const token = this.generateToken(user.id, user.email);
         const userProfile = await this.usersService.findOne(user.id);
         return {

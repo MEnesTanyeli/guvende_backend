@@ -21,6 +21,7 @@ export declare class UsersService {
             name: string;
         } | null;
         isLocked: boolean;
+        devicePermissions: any;
         createdAt: Date;
     }>;
     updateProfile(id: string, name?: string, phone?: string, gender?: string): Promise<{
@@ -42,6 +43,7 @@ export declare class UsersService {
             name: string;
         } | null;
         isLocked: boolean;
+        devicePermissions: any;
         createdAt: Date;
     }>;
     purchasePremiumMock(id: string): Promise<{
@@ -63,6 +65,7 @@ export declare class UsersService {
             name: string;
         } | null;
         isLocked: boolean;
+        devicePermissions: any;
         createdAt: Date;
     }>;
     setProxy(userId: string, email: string): Promise<{
@@ -84,6 +87,7 @@ export declare class UsersService {
             name: string;
         } | null;
         isLocked: boolean;
+        devicePermissions: any;
         createdAt: Date;
     }>;
     removeProxy(userId: string): Promise<{
@@ -105,6 +109,7 @@ export declare class UsersService {
             name: string;
         } | null;
         isLocked: boolean;
+        devicePermissions: any;
         createdAt: Date;
     }>;
     requestEmailChange(userId: string, newEmail: string): Promise<{
@@ -129,6 +134,13 @@ export declare class UsersService {
             name: string;
         } | null;
         isLocked: boolean;
+        devicePermissions: any;
         createdAt: Date;
+    }>;
+    resetDevice(guardianId: string, childId: string): Promise<{
+        message: string;
+    }>;
+    updateDevicePermissions(userId: string, permissions: any): Promise<{
+        success: boolean;
     }>;
 }

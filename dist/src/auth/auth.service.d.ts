@@ -30,6 +30,7 @@ export declare class AuthService {
                 name: string;
             } | null;
             isLocked: boolean;
+            devicePermissions: any;
             createdAt: Date;
         };
     }>;
@@ -55,6 +56,7 @@ export declare class AuthService {
                 name: string;
             } | null;
             isLocked: boolean;
+            devicePermissions: any;
             createdAt: Date;
         };
     }>;
@@ -80,6 +82,7 @@ export declare class AuthService {
                 name: string;
             } | null;
             isLocked: boolean;
+            devicePermissions: any;
             createdAt: Date;
         };
     }>;

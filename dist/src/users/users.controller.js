@@ -83,6 +83,12 @@ let UsersController = class UsersController {
     async confirmEmailChange(userId, dto) {
         return this.usersService.confirmEmailChange(userId, dto.code);
     }
+    async resetDevice(guardianId, childId) {
+        return this.usersService.resetDevice(guardianId, childId);
+    }
+    async updateDevicePermissions(userId, dto) {
+        return this.usersService.updateDevicePermissions(userId, dto);
+    }
 };
 exports.UsersController = UsersController;
 __decorate([
@@ -145,6 +151,22 @@ __decorate([
     __metadata("design:paramtypes", [String, ConfirmEmailChangeDto]),
     __metadata("design:returntype", Promise)
 ], UsersController.prototype, "confirmEmailChange", null);
+__decorate([
+    (0, common_1.Post)(':id/reset-device'),
+    __param(0, (0, get_user_decorator_1.GetUser)('id')),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:returntype", Promise)
+], UsersController.prototype, "resetDevice", null);
+__decorate([
+    (0, common_1.Patch)('device-permissions'),
+    __param(0, (0, get_user_decorator_1.GetUser)('id')),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", Promise)
+], UsersController.prototype, "updateDevicePermissions", null);
 exports.UsersController = UsersController = __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, common_1.Controller)('users'),

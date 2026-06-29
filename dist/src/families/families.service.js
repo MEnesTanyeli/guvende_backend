@@ -164,6 +164,7 @@ let FamiliesService = class FamiliesService {
                                 phone: true,
                                 gender: true,
                                 isLocked: true,
+                                devicePermissions: true,
                             },
                         },
                     },

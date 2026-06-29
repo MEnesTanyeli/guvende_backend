@@ -14,6 +14,7 @@ const class_validator_1 = require("class-validator");
 class LoginDto {
     email;
     password;
+    deviceId;
 }
 exports.LoginDto = LoginDto;
 __decorate([
@@ -27,4 +28,9 @@ __decorate([
     (0, class_validator_1.MinLength)(6, { message: 'Şifre en az 6 karakter olmalıdır.' }),
     __metadata("design:type", String)
 ], LoginDto.prototype, "password", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsOptional)(),
+    __metadata("design:type", String)
+], LoginDto.prototype, "deviceId", void 0);
 //# sourceMappingURL=login.dto.js.map

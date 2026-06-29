@@ -6,4 +6,5 @@ export declare class RecordLocationDto {
     batteryLevel?: number;
     isCharging?: boolean;
     connectionStatus?: string;
+    recordedAt?: string;
 }

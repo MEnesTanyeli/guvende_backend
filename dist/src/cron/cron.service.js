@@ -64,6 +64,13 @@ let CronService = class CronService {
             });
             const userName = user ? user.name : 'Bilinmeyen Üye';
             if (lastLocation && lastLocation.recordedAt < tenMinutesAgo) {
+                if (lastLocation.connectionStatus !== 'offline') {
+                    await this.prisma.location.update({
+                        where: { id: lastLocation.id },
+                        data: { connectionStatus: 'offline' },
+                    });
+                    this.logger.log(`Kullanıcı (${userName} - ${userId}) cihazı uzun süredir konum göndermediği için çevrimdışı durumuna güncellendi.`);
+                }
                 const activeAlert = await this.prisma.alert.findFirst({
                     where: {
                         userId,
@@ -241,6 +248,23 @@ let CronService = class CronService {
         }
         this.logger.log('Sessiz konum pingi zamanlanmış görevi tamamlandı.');
     }
+    async handleLocationsCleanup() {
+        this.logger.log('Eski konum kayıtlarını temizleme zamanlanmış görevi başlatılıyor...');
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        try {
+            const deleteResult = await this.prisma.location.deleteMany({
+                where: {
+                    recordedAt: {
+                        lt: thirtyDaysAgo,
+                    },
+                },
+            });
+            this.logger.log(`Eski konum temizliği tamamlandı. Toplam silinen konum kaydı: ${deleteResult.count}`);
+        }
+        catch (error) {
+            this.logger.error(`Eski konum kayıtları temizlenirken hata oluştu: ${error.message}`);
+        }
+    }
 };
 exports.CronService = CronService;
 __decorate([
@@ -267,6 +291,12 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", Promise)
 ], CronService.prototype, "handleSilentPingCheck", null);
+__decorate([
+    (0, schedule_1.Cron)('0 0 3 * * *'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", Promise)
+], CronService.prototype, "handleLocationsCleanup", null);
 exports.CronService = CronService = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,

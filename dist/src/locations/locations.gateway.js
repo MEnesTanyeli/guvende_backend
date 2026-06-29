@@ -181,9 +181,7 @@ let LocationsGateway = class LocationsGateway {
                 client.disconnect(true);
                 return;
             }
-            const payload = this.jwtService.verify(token, {
-                secret: process.env.JWT_SECRET || 'guvende_gizli_anahtar_uretimde_degistirin',
-            });
+            const payload = this.jwtService.verify(token);
             const userId = payload.sub;
             if (!userId) {
                 this.logger.warn(`Soket bağlantısı reddedildi: Geçersiz token payloadı. Cihaz: ${client.id}`);
@@ -292,58 +290,7 @@ let LocationsGateway = class LocationsGateway {
         return { status: 'success', room };
     }
     async handleSendDeviceLock(data, client) {
-        const senderId = client.data.userId;
-        if (!senderId) {
-            return { status: 'error', message: 'Yetkisiz erişim.' };
-        }
-        const { targetUserId, lockState } = data;
-        if (!targetUserId) {
-            return { status: 'error', message: 'Hedef kullanıcı belirtilmedi.' };
-        }
-        const isAuthorized = await this.prisma.familyMember.findFirst({
-            where: {
-                userId: senderId,
-                memberType: 'guardian',
-                family: {
-                    members: {
-                        some: {
-                            userId: targetUserId,
-                        },
-                    },
-                },
-            },
-        });
-        if (!isAuthorized) {
-            this.logger.warn(`Kullanıcı (${senderId}) yetkisi olmadan üye (${targetUserId}) için cihaz kilidi sinyali göndermeye çalıştı.`);
-            return { status: 'error', message: 'Bu üyeye cihaz kilidi sinyali gönderme yetkiniz yok.' };
-        }
-        await this.prisma.user.update({
-            where: { id: targetUserId },
-            data: { isLocked: lockState }
-        });
-        const sender = await this.prisma.user.findUnique({
-            where: { id: senderId },
-            select: { name: true },
-        });
-        const sent = this.sendEventToUser(targetUserId, 'device_lock_trigger', {
-            lockState,
-            senderName: sender?.name || 'Veliniz',
-            senderId,
-        });
-        await this.sendPushNotification([targetUserId], lockState ? '🔒 Cihazınız Kilitlendi' : '🔓 Cihazınızın Kilidi Açıldı', lockState
-            ? `${sender?.name || 'Veliniz'} cihazınızı uzaktan kilitledi.`
-            : `${sender?.name || 'Veliniz'} cihazınızın kilidini açtı.`, {
-            action: 'device_lock',
-            lockState,
-            senderName: sender?.name || 'Veliniz',
-            senderId,
-        });
-        if (sent) {
-            return { status: 'success', message: `Cihaz kilidi durumu başarıyla iletildi.` };
-        }
-        else {
-            return { status: 'success', message: 'Üye şu anda çevrimdışı, ancak kilit durumu kaydedildi ve push bildirim gönderildi.' };
-        }
+        return { status: 'error', message: 'Cihaz kilitleme özelliği devre dışı bırakılmıştır.' };
     }
     sendLocationUpdate(familyId, locationData) {
         const room = `family_${familyId}`;

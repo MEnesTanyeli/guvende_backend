@@ -34,6 +34,7 @@ export declare class AuthController {
                 name: string;
             } | null;
             isLocked: boolean;
+            devicePermissions: any;
             createdAt: Date;
         };
     }>;
@@ -59,6 +60,7 @@ export declare class AuthController {
                 name: string;
             } | null;
             isLocked: boolean;
+            devicePermissions: any;
             createdAt: Date;
         };
     }>;
@@ -84,6 +86,7 @@ export declare class AuthController {
                 name: string;
             } | null;
             isLocked: boolean;
+            devicePermissions: any;
             createdAt: Date;
         };
     }>;

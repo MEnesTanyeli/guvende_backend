@@ -32,6 +32,7 @@ export declare class UsersController {
             name: string;
         } | null;
         isLocked: boolean;
+        devicePermissions: any;
         createdAt: Date;
     }>;
     updateProfile(userId: string, dto: UpdateProfileDto): Promise<{
@@ -53,6 +54,7 @@ export declare class UsersController {
             name: string;
         } | null;
         isLocked: boolean;
+        devicePermissions: any;
         createdAt: Date;
     }>;
     purchasePremiumMock(userId: string): Promise<{
@@ -74,6 +76,7 @@ export declare class UsersController {
             name: string;
         } | null;
         isLocked: boolean;
+        devicePermissions: any;
         createdAt: Date;
     }>;
     setProxy(userId: string, body: {
@@ -97,6 +100,7 @@ export declare class UsersController {
             name: string;
         } | null;
         isLocked: boolean;
+        devicePermissions: any;
         createdAt: Date;
     }>;
     removeProxyPatch(userId: string): Promise<{
@@ -118,6 +122,7 @@ export declare class UsersController {
             name: string;
         } | null;
         isLocked: boolean;
+        devicePermissions: any;
         createdAt: Date;
     }>;
     removeProxyPost(userId: string): Promise<{
@@ -139,6 +144,7 @@ export declare class UsersController {
             name: string;
         } | null;
         isLocked: boolean;
+        devicePermissions: any;
         createdAt: Date;
     }>;
     requestEmailChange(userId: string, dto: RequestEmailChangeDto): Promise<{
@@ -163,7 +169,14 @@ export declare class UsersController {
             name: string;
         } | null;
         isLocked: boolean;
+        devicePermissions: any;
         createdAt: Date;
+    }>;
+    resetDevice(guardianId: string, childId: string): Promise<{
+        message: string;
+    }>;
+    updateDevicePermissions(userId: string, dto: any): Promise<{
+        success: boolean;
     }>;
 }
 export {};

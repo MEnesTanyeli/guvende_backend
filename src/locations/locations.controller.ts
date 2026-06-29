@@ -45,7 +45,7 @@ export class LocationsController {
   async ackAudibleWarning(
     @GetUser('id') childId: string,
     @Body('senderId') senderId: string,
-    @Body('action') action: 'received' | 'muted',
+    @Body('action') action: 'received' | 'muted' | 'unanswered',
   ) {
     return this.locationsService.ackAudibleWarning(childId, senderId, action);
   }
