@@ -324,4 +324,26 @@ export class CronService {
     }
     this.logger.log('Sessiz konum pingi zamanlanmış görevi tamamlandı.');
   }
+
+  // 5. Eski Konum Kayıtlarını Temizleme (Her gece saat 03:00'te çalışır)
+  @Cron('0 0 3 * * *')
+  async handleLocationsCleanup() {
+    this.logger.log('Eski konum kayıtlarını temizleme zamanlanmış görevi başlatılıyor...');
+
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    try {
+      const deleteResult = await this.prisma.location.deleteMany({
+        where: {
+          recordedAt: {
+            lt: thirtyDaysAgo,
+          },
+        },
+      });
+
+      this.logger.log(`Eski konum temizliği tamamlandı. Toplam silinen konum kaydı: ${deleteResult.count}`);
+    } catch (error) {
+      this.logger.error(`Eski konum kayıtları temizlenirken hata oluştu: ${error.message}`);
+    }
+  }
 }

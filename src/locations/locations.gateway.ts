@@ -170,9 +170,7 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
         return;
       }
 
-      const payload = this.jwtService.verify(token, {
-        secret: process.env.JWT_SECRET || 'guvende_gizli_anahtar_uretimde_degistirin',
-      });
+      const payload = this.jwtService.verify(token);
       const userId = payload.sub;
 
       if (!userId) {
