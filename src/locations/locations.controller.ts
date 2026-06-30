@@ -1,14 +1,18 @@
-import { Body, Controller, Get, Param, Post, UseGuards, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, UseGuards, Query } from '@nestjs/common';
 import { LocationsService } from './locations.service';
 import { RecordLocationDto } from './dto/record-location.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SubscriptionGuard } from '../auth/guards/subscription.guard';
 import { GetUser } from '../auth/decorators/get-user.decorator';
+import { LocationsGateway } from './locations.gateway';
 
 @UseGuards(JwtAuthGuard, SubscriptionGuard)
 @Controller()
 export class LocationsController {
-  constructor(private locationsService: LocationsService) {}
+  constructor(
+    private locationsService: LocationsService,
+    private locationsGateway: LocationsGateway
+  ) {}
 
   @Post('locations')
   async recordLocation(@GetUser('id') userId: string, @Body() dto: RecordLocationDto) {
@@ -48,5 +52,36 @@ export class LocationsController {
     @Body('action') action: 'received' | 'muted' | 'unanswered',
   ) {
     return this.locationsService.ackAudibleWarning(childId, senderId, action);
+  }
+
+  @Delete('families/:familyId/members/:targetUserId/locations/today')
+  async deleteTodayLocations(
+    @GetUser('id') userId: string,
+    @Param('familyId') familyId: string,
+    @Param('targetUserId') targetUserId: string,
+  ) {
+    return this.locationsService.deleteTodayLocations(userId, familyId, targetUserId);
+  }
+
+  @Post('families/:familyId/members/:targetUserId/test-drift')
+  async triggerTestDrift(
+    @GetUser('id') userId: string,
+    @Param('familyId') familyId: string,
+    @Param('targetUserId') targetUserId: string,
+  ) {
+    const res = await this.locationsService.triggerTestLocationEvent(userId, familyId, targetUserId);
+    this.locationsGateway.server.to(`family_${familyId}`).emit('trigger-test-drift', { targetUserId });
+    return res;
+  }
+
+  @Post('families/:familyId/members/:targetUserId/test-walk')
+  async triggerTestWalk(
+    @GetUser('id') userId: string,
+    @Param('familyId') familyId: string,
+    @Param('targetUserId') targetUserId: string,
+  ) {
+    const res = await this.locationsService.triggerTestLocationEvent(userId, familyId, targetUserId);
+    this.locationsGateway.server.to(`family_${familyId}`).emit('trigger-test-walk', { targetUserId });
+    return res;
   }
 }

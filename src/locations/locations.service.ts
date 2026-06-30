@@ -499,5 +499,82 @@ export class LocationsService {
 
     return { success: true };
   }
+
+  async deleteTodayLocations(userId: string, familyId: string, targetUserId: string) {
+    // Ailede üyelik kontrolü
+    const isMember = await this.prisma.familyMember.findUnique({
+      where: {
+        familyId_userId: {
+          familyId,
+          userId,
+        },
+      },
+    });
+
+    if (!isMember) {
+      throw new ForbiddenException('Bu aile grubunun verilerine erişim yetkiniz yok.');
+    }
+
+    // Hedef kullanıcının ailede üye olup olmadığı kontrolü
+    const targetMember = await this.prisma.familyMember.findUnique({
+      where: {
+        familyId_userId: {
+          familyId,
+          userId: targetUserId,
+        },
+      },
+    });
+
+    if (!targetMember) {
+      throw new NotFoundException('Hedef kullanıcı bu aile grubunda bulunamadı.');
+    }
+
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    return this.prisma.location.deleteMany({
+      where: {
+        userId: targetUserId,
+        recordedAt: {
+          gte: startOfDay,
+          lte: endOfDay,
+        },
+      },
+    });
+  }
+
+  async triggerTestLocationEvent(userId: string, familyId: string, targetUserId: string) {
+    // Ailede üyelik kontrolü
+    const isMember = await this.prisma.familyMember.findUnique({
+      where: {
+        familyId_userId: {
+          familyId,
+          userId,
+        },
+      },
+    });
+
+    if (!isMember || isMember.memberType !== 'guardian') {
+      throw new ForbiddenException('Bu işlem için veli yetkisi gereklidir.');
+    }
+
+    // Hedef kullanıcının ailede üye olup olmadığı kontrolü
+    const targetMember = await this.prisma.familyMember.findUnique({
+      where: {
+        familyId_userId: {
+          familyId,
+          userId: targetUserId,
+        },
+      },
+    });
+
+    if (!targetMember) {
+      throw new NotFoundException('Hedef kullanıcı bu aile grubunda bulunamadı.');
+    }
+
+    return { success: true };
+  }
 }
 
