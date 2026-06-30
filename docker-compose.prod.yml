@@ -30,6 +30,7 @@ services:
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       ONESIGNAL_APP_ID: ${ONESIGNAL_APP_ID:-}
       ONESIGNAL_REST_API_KEY: ${ONESIGNAL_REST_API_KEY:-}
+      BREVO_API_KEY: ${BREVO_API_KEY}
     ports:
       - "127.0.0.1:3001:3001"
     healthcheck:

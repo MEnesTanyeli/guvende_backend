@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { UsersService } from '../users/users.service';
+import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class AuthService {
@@ -12,6 +13,7 @@ export class AuthService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private usersService: UsersService,
+    private mailService: MailService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -42,6 +44,12 @@ export class AuthService {
         gender: dto.gender,
       },
     });
+
+    try {
+      await this.mailService.sendWelcomeEmail(user.email, user.name);
+    } catch (error) {
+      console.error('Hos geldiniz e-postasi gonderilemedi:', error);
+    }
 
     const token = this.generateToken(user.id, user.email);
     const userProfile = await this.usersService.findOne(user.id);
