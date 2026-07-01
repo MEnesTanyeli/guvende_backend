@@ -19,10 +19,13 @@ const record_location_dto_1 = require("./dto/record-location.dto");
 const jwt_auth_guard_1 = require("../auth/guards/jwt-auth.guard");
 const subscription_guard_1 = require("../auth/guards/subscription.guard");
 const get_user_decorator_1 = require("../auth/decorators/get-user.decorator");
+const locations_gateway_1 = require("./locations.gateway");
 let LocationsController = class LocationsController {
     locationsService;
-    constructor(locationsService) {
+    locationsGateway;
+    constructor(locationsService, locationsGateway) {
         this.locationsService = locationsService;
+        this.locationsGateway = locationsGateway;
     }
     async recordLocation(userId, dto) {
         return this.locationsService.recordLocation(userId, dto);
@@ -38,6 +41,19 @@ let LocationsController = class LocationsController {
     }
     async ackAudibleWarning(childId, senderId, action) {
         return this.locationsService.ackAudibleWarning(childId, senderId, action);
+    }
+    async deleteTodayLocations(userId, familyId, targetUserId) {
+        return this.locationsService.deleteTodayLocations(userId, familyId, targetUserId);
+    }
+    async triggerTestDrift(userId, familyId, targetUserId) {
+        const res = await this.locationsService.triggerTestLocationEvent(userId, familyId, targetUserId);
+        this.locationsGateway.server.to(`family_${familyId}`).emit('trigger-test-drift', { targetUserId });
+        return res;
+    }
+    async triggerTestWalk(userId, familyId, targetUserId) {
+        const res = await this.locationsService.triggerTestLocationEvent(userId, familyId, targetUserId);
+        this.locationsGateway.server.to(`family_${familyId}`).emit('trigger-test-walk', { targetUserId });
+        return res;
     }
 };
 exports.LocationsController = LocationsController;
@@ -84,9 +100,37 @@ __decorate([
     __metadata("design:paramtypes", [String, String, String]),
     __metadata("design:returntype", Promise)
 ], LocationsController.prototype, "ackAudibleWarning", null);
+__decorate([
+    (0, common_1.Delete)('families/:familyId/members/:targetUserId/locations/today'),
+    __param(0, (0, get_user_decorator_1.GetUser)('id')),
+    __param(1, (0, common_1.Param)('familyId')),
+    __param(2, (0, common_1.Param)('targetUserId')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String]),
+    __metadata("design:returntype", Promise)
+], LocationsController.prototype, "deleteTodayLocations", null);
+__decorate([
+    (0, common_1.Post)('families/:familyId/members/:targetUserId/test-drift'),
+    __param(0, (0, get_user_decorator_1.GetUser)('id')),
+    __param(1, (0, common_1.Param)('familyId')),
+    __param(2, (0, common_1.Param)('targetUserId')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String]),
+    __metadata("design:returntype", Promise)
+], LocationsController.prototype, "triggerTestDrift", null);
+__decorate([
+    (0, common_1.Post)('families/:familyId/members/:targetUserId/test-walk'),
+    __param(0, (0, get_user_decorator_1.GetUser)('id')),
+    __param(1, (0, common_1.Param)('familyId')),
+    __param(2, (0, common_1.Param)('targetUserId')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String]),
+    __metadata("design:returntype", Promise)
+], LocationsController.prototype, "triggerTestWalk", null);
 exports.LocationsController = LocationsController = __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard, subscription_guard_1.SubscriptionGuard),
     (0, common_1.Controller)(),
-    __metadata("design:paramtypes", [locations_service_1.LocationsService])
+    __metadata("design:paramtypes", [locations_service_1.LocationsService,
+        locations_gateway_1.LocationsGateway])
 ], LocationsController);
 //# sourceMappingURL=locations.controller.js.map

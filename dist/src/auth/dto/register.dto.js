@@ -18,6 +18,7 @@ class RegisterDto {
     phone;
     role;
     gender;
+    code;
 }
 exports.RegisterDto = RegisterDto;
 __decorate([
@@ -53,4 +54,9 @@ __decorate([
     (0, class_validator_1.IsIn)(['male', 'female', 'other'], { message: 'Geçersiz cinsiyet seçildi.' }),
     __metadata("design:type", String)
 ], RegisterDto.prototype, "gender", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsNotEmpty)({ message: 'Doğrulama kodu boş bırakılamaz.' }),
+    __metadata("design:type", String)
+], RegisterDto.prototype, "code", void 0);
 //# sourceMappingURL=register.dto.js.map

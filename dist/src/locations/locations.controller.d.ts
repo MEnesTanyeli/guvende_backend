@@ -1,8 +1,10 @@
 import { LocationsService } from './locations.service';
 import { RecordLocationDto } from './dto/record-location.dto';
+import { LocationsGateway } from './locations.gateway';
 export declare class LocationsController {
     private locationsService;
-    constructor(locationsService: LocationsService);
+    private locationsGateway;
+    constructor(locationsService: LocationsService, locationsGateway: LocationsGateway);
     recordLocation(userId: string, dto: RecordLocationDto): Promise<{
         user: {
             id: string;
@@ -52,7 +54,14 @@ export declare class LocationsController {
         success: boolean;
         message: string;
     }>;
-    ackAudibleWarning(childId: string, senderId: string, action: 'received' | 'muted'): Promise<{
+    ackAudibleWarning(childId: string, senderId: string, action: 'received' | 'muted' | 'unanswered'): Promise<{
+        success: boolean;
+    }>;
+    deleteTodayLocations(userId: string, familyId: string, targetUserId: string): Promise<import(".prisma/client").Prisma.BatchPayload>;
+    triggerTestDrift(userId: string, familyId: string, targetUserId: string): Promise<{
+        success: boolean;
+    }>;
+    triggerTestWalk(userId: string, familyId: string, targetUserId: string): Promise<{
         success: boolean;
     }>;
 }

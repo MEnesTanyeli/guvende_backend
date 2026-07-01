@@ -206,3 +206,13 @@ model AppUsage {
   @@unique([userId, packageName, recordedDate])
   @@map("app_usages")
 }
+
+model EmailVerification {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  code      String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("email_verifications")
+}

@@ -338,12 +338,104 @@ let LocationsService = class LocationsService {
             where: { id: childId },
             select: { name: true },
         });
+        const sharedMembership = await this.prisma.familyMember.findFirst({
+            where: {
+                userId: childId,
+                family: {
+                    members: {
+                        some: {
+                            userId: senderId,
+                        },
+                    },
+                },
+            },
+            select: {
+                familyId: true,
+            },
+        });
         this.locationsGateway.sendEventToUser(senderId, 'audible_warning_status', {
             childId,
             childName: child?.name || 'Çocuğunuz',
             status: action,
             deliveredAt: new Date(),
         });
+        if (action === 'unanswered' && sharedMembership) {
+            const alertTitle = '⚠️ Sesli Uyarı Yanıtsız Kaldı!';
+            const alertMsg = `${child?.name || 'Çocuğunuz'} gönderilen acil sesli uyarıyı 60 saniye boyunca kapatmadı! Acil durum olabilir.`;
+            await this.prisma.alert.create({
+                data: {
+                    familyId: sharedMembership.familyId,
+                    userId: childId,
+                    type: 'sos',
+                    title: alertTitle,
+                    message: alertMsg,
+                    metadata: { senderId },
+                },
+            });
+            await this.notificationsService.sendFamilyNotification(sharedMembership.familyId, childId, alertTitle, alertMsg, { action: 'audible_warning_unanswered', childId });
+        }
+        return { success: true };
+    }
+    async deleteTodayLocations(userId, familyId, targetUserId) {
+        const isMember = await this.prisma.familyMember.findUnique({
+            where: {
+                familyId_userId: {
+                    familyId,
+                    userId,
+                },
+            },
+        });
+        if (!isMember) {
+            throw new common_1.ForbiddenException('Bu aile grubunun verilerine erişim yetkiniz yok.');
+        }
+        const targetMember = await this.prisma.familyMember.findUnique({
+            where: {
+                familyId_userId: {
+                    familyId,
+                    userId: targetUserId,
+                },
+            },
+        });
+        if (!targetMember) {
+            throw new common_1.NotFoundException('Hedef kullanıcı bu aile grubunda bulunamadı.');
+        }
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date();
+        endOfDay.setHours(23, 59, 59, 999);
+        return this.prisma.location.deleteMany({
+            where: {
+                userId: targetUserId,
+                recordedAt: {
+                    gte: startOfDay,
+                    lte: endOfDay,
+                },
+            },
+        });
+    }
+    async triggerTestLocationEvent(userId, familyId, targetUserId) {
+        const isMember = await this.prisma.familyMember.findUnique({
+            where: {
+                familyId_userId: {
+                    familyId,
+                    userId,
+                },
+            },
+        });
+        if (!isMember || isMember.memberType !== 'guardian') {
+            throw new common_1.ForbiddenException('Bu işlem için veli yetkisi gereklidir.');
+        }
+        const targetMember = await this.prisma.familyMember.findUnique({
+            where: {
+                familyId_userId: {
+                    familyId,
+                    userId: targetUserId,
+                },
+            },
+        });
+        if (!targetMember) {
+            throw new common_1.NotFoundException('Hedef kullanıcı bu aile grubunda bulunamadı.');
+        }
         return { success: true };
     }
 };

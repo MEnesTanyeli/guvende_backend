@@ -57,7 +57,11 @@ export declare class LocationsService {
         success: boolean;
         message: string;
     }>;
-    ackAudibleWarning(childId: string, senderId: string, action: 'received' | 'muted'): Promise<{
+    ackAudibleWarning(childId: string, senderId: string, action: 'received' | 'muted' | 'unanswered'): Promise<{
+        success: boolean;
+    }>;
+    deleteTodayLocations(userId: string, familyId: string, targetUserId: string): Promise<import(".prisma/client").Prisma.BatchPayload>;
+    triggerTestLocationEvent(userId: string, familyId: string, targetUserId: string): Promise<{
         success: boolean;
     }>;
 }

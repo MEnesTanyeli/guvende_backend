@@ -21,7 +21,7 @@ export declare class UsersService {
             name: string;
         } | null;
         isLocked: boolean;
-        devicePermissions: any;
+        devicePermissions: import("@prisma/client/runtime/library").JsonValue;
         createdAt: Date;
     }>;
     updateProfile(id: string, name?: string, phone?: string, gender?: string): Promise<{
@@ -43,7 +43,7 @@ export declare class UsersService {
             name: string;
         } | null;
         isLocked: boolean;
-        devicePermissions: any;
+        devicePermissions: import("@prisma/client/runtime/library").JsonValue;
         createdAt: Date;
     }>;
     purchasePremiumMock(id: string): Promise<{
@@ -65,7 +65,7 @@ export declare class UsersService {
             name: string;
         } | null;
         isLocked: boolean;
-        devicePermissions: any;
+        devicePermissions: import("@prisma/client/runtime/library").JsonValue;
         createdAt: Date;
     }>;
     setProxy(userId: string, email: string): Promise<{
@@ -87,7 +87,7 @@ export declare class UsersService {
             name: string;
         } | null;
         isLocked: boolean;
-        devicePermissions: any;
+        devicePermissions: import("@prisma/client/runtime/library").JsonValue;
         createdAt: Date;
     }>;
     removeProxy(userId: string): Promise<{
@@ -109,7 +109,7 @@ export declare class UsersService {
             name: string;
         } | null;
         isLocked: boolean;
-        devicePermissions: any;
+        devicePermissions: import("@prisma/client/runtime/library").JsonValue;
         createdAt: Date;
     }>;
     requestEmailChange(userId: string, newEmail: string): Promise<{
@@ -134,7 +134,7 @@ export declare class UsersService {
             name: string;
         } | null;
         isLocked: boolean;
-        devicePermissions: any;
+        devicePermissions: import("@prisma/client/runtime/library").JsonValue;
         createdAt: Date;
     }>;
     resetDevice(guardianId: string, childId: string): Promise<{

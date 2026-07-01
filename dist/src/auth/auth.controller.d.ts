@@ -12,6 +12,10 @@ declare class ResetPasswordDto {
 export declare class AuthController {
     private authService;
     constructor(authService: AuthService);
+    sendRegisterCode(email: string): Promise<{
+        success: boolean;
+        message: string;
+    }>;
     register(dto: RegisterDto): Promise<{
         message: string;
         token: string;
@@ -34,7 +38,7 @@ export declare class AuthController {
                 name: string;
             } | null;
             isLocked: boolean;
-            devicePermissions: any;
+            devicePermissions: import("@prisma/client/runtime/library").JsonValue;
             createdAt: Date;
         };
     }>;
@@ -60,7 +64,7 @@ export declare class AuthController {
                 name: string;
             } | null;
             isLocked: boolean;
-            devicePermissions: any;
+            devicePermissions: import("@prisma/client/runtime/library").JsonValue;
             createdAt: Date;
         };
     }>;
@@ -86,7 +90,7 @@ export declare class AuthController {
                 name: string;
             } | null;
             isLocked: boolean;
-            devicePermissions: any;
+            devicePermissions: import("@prisma/client/runtime/library").JsonValue;
             createdAt: Date;
         };
     }>;

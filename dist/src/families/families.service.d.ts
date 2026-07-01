@@ -41,6 +41,41 @@ export declare class FamiliesService {
         ownerId: string;
     })[]>;
     findOne(userId: string, familyId: string): Promise<{
+        owner: {
+            id: string;
+            email: string;
+            name: string;
+        };
+        members: ({
+            user: {
+                id: string;
+                email: string;
+                name: string;
+                phone: string | null;
+                gender: string | null;
+                isLocked: boolean;
+                devicePermissions: import("@prisma/client/runtime/library").JsonValue;
+            };
+        } & {
+            id: string;
+            createdAt: Date;
+            familyId: string;
+            userId: string;
+            memberType: import(".prisma/client").$Enums.MemberType;
+            permissions: string[];
+            muteNotifications: boolean;
+        })[];
+        safeZones: {
+            id: string;
+            name: string;
+            createdAt: Date;
+            familyId: string;
+            latitude: number;
+            longitude: number;
+            radius: number;
+            createdBy: string;
+        }[];
+    } & {
         id: string;
         name: string;
         createdAt: Date;

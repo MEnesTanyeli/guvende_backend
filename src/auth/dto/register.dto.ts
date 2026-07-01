@@ -27,4 +27,8 @@ export class RegisterDto {
   @IsOptional()
   @IsIn(['male', 'female', 'other'], { message: 'Geçersiz cinsiyet seçildi.' })
   gender?: string;
+
+  @IsString()
+  @IsNotEmpty({ message: 'Doğrulama kodu boş bırakılamaz.' })
+  code: string;
 }

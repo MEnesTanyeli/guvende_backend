@@ -54,6 +54,12 @@ let AuthController = class AuthController {
     constructor(authService) {
         this.authService = authService;
     }
+    async sendRegisterCode(email) {
+        if (!email) {
+            throw new common_1.BadRequestException('E-posta alanı boş bırakılamaz.');
+        }
+        return this.authService.sendVerificationCode(email);
+    }
     async register(dto) {
         return this.authService.register(dto);
     }
@@ -74,6 +80,14 @@ let AuthController = class AuthController {
     }
 };
 exports.AuthController = AuthController;
+__decorate([
+    (0, throttler_1.Throttle)({ default: { limit: 3, ttl: 60_000 } }),
+    (0, common_1.Post)('register/send-code'),
+    __param(0, (0, common_1.Body)('email')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], AuthController.prototype, "sendRegisterCode", null);
 __decorate([
     (0, throttler_1.Throttle)({ default: { limit: 5, ttl: 60_000 } }),
     (0, common_1.Post)('register'),

@@ -16,13 +16,57 @@ export class AuthService {
     private mailService: MailService,
   ) {}
 
-  async register(dto: RegisterDto) {
+  async sendVerificationCode(email: string) {
+    const cleanedEmail = email.toLowerCase().trim();
+
+    // E-posta kullanımda mı kontrolü
     const existingUser = await this.prisma.user.findUnique({
-      where: { email: dto.email.toLowerCase() },
+      where: { email: cleanedEmail },
     });
 
     if (existingUser) {
       throw new ConflictException('Bu e-posta adresi zaten kullanımda.');
+    }
+
+    // 6 haneli rastgele kod üret
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 dakika geçerli
+
+    // Kod tablosuna kaydet veya güncelle (UPSERT)
+    await this.prisma.emailVerification.upsert({
+      where: { email: cleanedEmail },
+      update: { code, expiresAt },
+      create: { email: cleanedEmail, code, expiresAt },
+    });
+
+    // E-postayı gönder
+    await this.mailService.sendVerificationCodeEmail(cleanedEmail, code);
+
+    return { success: true, message: 'Doğrulama kodu e-posta adresinize gönderildi.' };
+  }
+
+  async register(dto: RegisterDto) {
+    const cleanedEmail = dto.email.toLowerCase().trim();
+
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: cleanedEmail },
+    });
+
+    if (existingUser) {
+      throw new ConflictException('Bu e-posta adresi zaten kullanımda.');
+    }
+
+    // Doğrulama kodunu veritabanından çek ve doğrula
+    const verification = await this.prisma.emailVerification.findUnique({
+      where: { email: cleanedEmail },
+    });
+
+    if (!verification || verification.code !== dto.code) {
+      throw new BadRequestException('Girdiğiniz doğrulama kodu hatalıdır.');
+    }
+
+    if (verification.expiresAt < new Date()) {
+      throw new BadRequestException('Doğrulama kodunun süresi dolmuş. Lütfen yeni bir kod isteyin.');
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
@@ -35,7 +79,7 @@ export class AuthService {
 
     const user = await this.prisma.user.create({
       data: {
-        email: dto.email.toLowerCase(),
+        email: cleanedEmail,
         passwordHash,
         name: dto.name,
         phone: dto.phone,
@@ -44,6 +88,11 @@ export class AuthService {
         gender: dto.gender,
       },
     });
+
+    // Doğrulama kaydını sil
+    await this.prisma.emailVerification.delete({
+      where: { email: cleanedEmail },
+    }).catch(() => {});
 
     try {
       await this.mailService.sendWelcomeEmail(user.email, user.name);
@@ -157,12 +206,15 @@ export class AuthService {
       },
     });
 
-    console.log(`\n==================================================`);
-    console.log(`🔑 ŞİFRE SIFIRLAMA KODU (${email}): ${resetCode}`);
-    console.log(`==================================================\n`);
+    try {
+      await this.mailService.sendResetPasswordEmail(user.email, resetCode);
+    } catch (error) {
+      console.error('Sifre sifirlama e-postasi gonderilemedi:', error);
+      throw new BadRequestException('Şifre sıfırlama e-postası gönderilirken hata oluştu.');
+    }
 
     return {
-      message: 'Şifre sıfırlama kodu başarıyla oluşturuldu (Loglara yazdırıldı).',
+      message: 'Şifre sıfırlama kodu e-posta adresinize gönderildi.',
     };
   }
 

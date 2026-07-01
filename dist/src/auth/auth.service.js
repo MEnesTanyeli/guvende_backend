@@ -48,21 +48,52 @@ const jwt_1 = require("@nestjs/jwt");
 const bcrypt = __importStar(require("bcrypt"));
 const prisma_service_1 = require("../prisma/prisma.service");
 const users_service_1 = require("../users/users.service");
+const mail_service_1 = require("../mail/mail.service");
 let AuthService = class AuthService {
     prisma;
     jwtService;
     usersService;
-    constructor(prisma, jwtService, usersService) {
+    mailService;
+    constructor(prisma, jwtService, usersService, mailService) {
         this.prisma = prisma;
         this.jwtService = jwtService;
         this.usersService = usersService;
+        this.mailService = mailService;
     }
-    async register(dto) {
+    async sendVerificationCode(email) {
+        const cleanedEmail = email.toLowerCase().trim();
         const existingUser = await this.prisma.user.findUnique({
-            where: { email: dto.email.toLowerCase() },
+            where: { email: cleanedEmail },
         });
         if (existingUser) {
             throw new common_1.ConflictException('Bu e-posta adresi zaten kullanımda.');
+        }
+        const code = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+        await this.prisma.emailVerification.upsert({
+            where: { email: cleanedEmail },
+            update: { code, expiresAt },
+            create: { email: cleanedEmail, code, expiresAt },
+        });
+        await this.mailService.sendVerificationCodeEmail(cleanedEmail, code);
+        return { success: true, message: 'Doğrulama kodu e-posta adresinize gönderildi.' };
+    }
+    async register(dto) {
+        const cleanedEmail = dto.email.toLowerCase().trim();
+        const existingUser = await this.prisma.user.findUnique({
+            where: { email: cleanedEmail },
+        });
+        if (existingUser) {
+            throw new common_1.ConflictException('Bu e-posta adresi zaten kullanımda.');
+        }
+        const verification = await this.prisma.emailVerification.findUnique({
+            where: { email: cleanedEmail },
+        });
+        if (!verification || verification.code !== dto.code) {
+            throw new common_1.BadRequestException('Girdiğiniz doğrulama kodu hatalıdır.');
+        }
+        if (verification.expiresAt < new Date()) {
+            throw new common_1.BadRequestException('Doğrulama kodunun süresi dolmuş. Lütfen yeni bir kod isteyin.');
         }
         const passwordHash = await bcrypt.hash(dto.password, 10);
         const userRole = dto.role || 'guardian';
@@ -72,7 +103,7 @@ let AuthService = class AuthService {
         }
         const user = await this.prisma.user.create({
             data: {
-                email: dto.email.toLowerCase(),
+                email: cleanedEmail,
                 passwordHash,
                 name: dto.name,
                 phone: dto.phone,
@@ -81,6 +112,15 @@ let AuthService = class AuthService {
                 gender: dto.gender,
             },
         });
+        await this.prisma.emailVerification.delete({
+            where: { email: cleanedEmail },
+        }).catch(() => { });
+        try {
+            await this.mailService.sendWelcomeEmail(user.email, user.name);
+        }
+        catch (error) {
+            console.error('Hos geldiniz e-postasi gonderilemedi:', error);
+        }
         const token = this.generateToken(user.id, user.email);
         const userProfile = await this.usersService.findOne(user.id);
         return {
@@ -167,11 +207,15 @@ let AuthService = class AuthService {
                 resetOtpExpiresAt: resetExpires,
             },
         });
-        console.log(`\n==================================================`);
-        console.log(`🔑 ŞİFRE SIFIRLAMA KODU (${email}): ${resetCode}`);
-        console.log(`==================================================\n`);
+        try {
+            await this.mailService.sendResetPasswordEmail(user.email, resetCode);
+        }
+        catch (error) {
+            console.error('Sifre sifirlama e-postasi gonderilemedi:', error);
+            throw new common_1.BadRequestException('Şifre sıfırlama e-postası gönderilirken hata oluştu.');
+        }
         return {
-            message: 'Şifre sıfırlama kodu başarıyla oluşturuldu (Loglara yazdırıldı).',
+            message: 'Şifre sıfırlama kodu e-posta adresinize gönderildi.',
         };
     }
     async resetPassword(dto) {
@@ -206,6 +250,7 @@ exports.AuthService = AuthService = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
         jwt_1.JwtService,
-        users_service_1.UsersService])
+        users_service_1.UsersService,
+        mail_service_1.MailService])
 ], AuthService);
 //# sourceMappingURL=auth.service.js.map

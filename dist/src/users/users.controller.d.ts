@@ -32,7 +32,7 @@ export declare class UsersController {
             name: string;
         } | null;
         isLocked: boolean;
-        devicePermissions: any;
+        devicePermissions: import("@prisma/client/runtime/library").JsonValue;
         createdAt: Date;
     }>;
     updateProfile(userId: string, dto: UpdateProfileDto): Promise<{
@@ -54,7 +54,7 @@ export declare class UsersController {
             name: string;
         } | null;
         isLocked: boolean;
-        devicePermissions: any;
+        devicePermissions: import("@prisma/client/runtime/library").JsonValue;
         createdAt: Date;
     }>;
     purchasePremiumMock(userId: string): Promise<{
@@ -76,7 +76,7 @@ export declare class UsersController {
             name: string;
         } | null;
         isLocked: boolean;
-        devicePermissions: any;
+        devicePermissions: import("@prisma/client/runtime/library").JsonValue;
         createdAt: Date;
     }>;
     setProxy(userId: string, body: {
@@ -100,7 +100,7 @@ export declare class UsersController {
             name: string;
         } | null;
         isLocked: boolean;
-        devicePermissions: any;
+        devicePermissions: import("@prisma/client/runtime/library").JsonValue;
         createdAt: Date;
     }>;
     removeProxyPatch(userId: string): Promise<{
@@ -122,7 +122,7 @@ export declare class UsersController {
             name: string;
         } | null;
         isLocked: boolean;
-        devicePermissions: any;
+        devicePermissions: import("@prisma/client/runtime/library").JsonValue;
         createdAt: Date;
     }>;
     removeProxyPost(userId: string): Promise<{
@@ -144,7 +144,7 @@ export declare class UsersController {
             name: string;
         } | null;
         isLocked: boolean;
-        devicePermissions: any;
+        devicePermissions: import("@prisma/client/runtime/library").JsonValue;
         createdAt: Date;
     }>;
     requestEmailChange(userId: string, dto: RequestEmailChangeDto): Promise<{
@@ -169,7 +169,7 @@ export declare class UsersController {
             name: string;
         } | null;
         isLocked: boolean;
-        devicePermissions: any;
+        devicePermissions: import("@prisma/client/runtime/library").JsonValue;
         createdAt: Date;
     }>;
     resetDevice(guardianId: string, childId: string): Promise<{

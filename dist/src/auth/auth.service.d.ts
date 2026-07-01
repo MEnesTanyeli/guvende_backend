@@ -3,11 +3,17 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { UsersService } from '../users/users.service';
+import { MailService } from '../mail/mail.service';
 export declare class AuthService {
     private prisma;
     private jwtService;
     private usersService;
-    constructor(prisma: PrismaService, jwtService: JwtService, usersService: UsersService);
+    private mailService;
+    constructor(prisma: PrismaService, jwtService: JwtService, usersService: UsersService, mailService: MailService);
+    sendVerificationCode(email: string): Promise<{
+        success: boolean;
+        message: string;
+    }>;
     register(dto: RegisterDto): Promise<{
         message: string;
         token: string;
@@ -30,7 +36,7 @@ export declare class AuthService {
                 name: string;
             } | null;
             isLocked: boolean;
-            devicePermissions: any;
+            devicePermissions: import("@prisma/client/runtime/library").JsonValue;
             createdAt: Date;
         };
     }>;
@@ -56,7 +62,7 @@ export declare class AuthService {
                 name: string;
             } | null;
             isLocked: boolean;
-            devicePermissions: any;
+            devicePermissions: import("@prisma/client/runtime/library").JsonValue;
             createdAt: Date;
         };
     }>;
@@ -82,7 +88,7 @@ export declare class AuthService {
                 name: string;
             } | null;
             isLocked: boolean;
-            devicePermissions: any;
+            devicePermissions: import("@prisma/client/runtime/library").JsonValue;
             createdAt: Date;
         };
     }>;

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, UseGuards, BadRequestException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -30,6 +30,15 @@ class ResetPasswordDto {
 @Controller('auth')
 export class AuthController {
   constructor(private authService: AuthService) {}
+
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @Post('register/send-code')
+  async sendRegisterCode(@Body('email') email: string) {
+    if (!email) {
+      throw new BadRequestException('E-posta alanı boş bırakılamaz.');
+    }
+    return this.authService.sendVerificationCode(email);
+  }
 
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('register')

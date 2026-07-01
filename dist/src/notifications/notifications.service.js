@@ -76,6 +76,7 @@ let NotificationsService = class NotificationsService {
             payload.buttons = [
                 { id: 'mute_warning', text: 'Sustur', icon: '' }
             ];
+            payload.android_ongoing = true;
         }
         const payloadStr = JSON.stringify(payload);
         const options = {
