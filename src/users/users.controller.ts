@@ -2,19 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/co
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { GetUser } from '../auth/decorators/get-user.decorator';
-import { IsOptional, IsString, IsEmail, IsNotEmpty } from 'class-validator';
-
-class RequestEmailChangeDto {
-  @IsEmail({}, { message: 'Geçerli bir yeni e-posta adresi giriniz.' })
-  @IsNotEmpty({ message: 'Yeni e-posta alanı boş bırakılamaz.' })
-  newEmail: string;
-}
-
-class ConfirmEmailChangeDto {
-  @IsString()
-  @IsNotEmpty({ message: 'Doğrulama kodu boş bırakılamaz.' })
-  code: string;
-}
+import { IsOptional, IsString } from 'class-validator';
 
 class UpdateProfileDto {
   @IsString()
@@ -58,16 +46,6 @@ export class UsersController {
   @Post('proxy/remove') // Support both just in case
   async removeProxyPost(@GetUser('id') userId: string) {
     return this.usersService.removeProxy(userId);
-  }
-
-  @Post('request-email-change')
-  async requestEmailChange(@GetUser('id') userId: string, @Body() dto: RequestEmailChangeDto) {
-    return this.usersService.requestEmailChange(userId, dto.newEmail);
-  }
-
-  @Post('confirm-email-change')
-  async confirmEmailChange(@GetUser('id') userId: string, @Body() dto: ConfirmEmailChangeDto) {
-    return this.usersService.confirmEmailChange(userId, dto.code);
   }
 
   @Post(':id/reset-device')
