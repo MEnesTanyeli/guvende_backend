@@ -32,7 +32,7 @@ services:
       ONESIGNAL_APP_ID: ${ONESIGNAL_APP_ID:-}
       ONESIGNAL_REST_API_KEY: ${ONESIGNAL_REST_API_KEY:-}
       BREVO_API_KEY: ${BREVO_API_KEY}
-      CORS_ORIGINS: ${CORS_ORIGINS}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://guvende.app,https://www.guvende.app,capacitor://localhost,http://localhost}
     ports:
       - "127.0.0.1:3001:3001"
     read_only: true
