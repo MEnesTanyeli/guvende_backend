@@ -16,6 +16,7 @@ export class MailService {
 
     const safeName = this.escapeHtml(name || 'Kullanici');
     const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      signal: AbortSignal.timeout(10_000),
       method: 'POST',
       headers: {
         accept: 'application/json',
@@ -66,6 +67,7 @@ export class MailService {
     }
 
     const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      signal: AbortSignal.timeout(10_000),
       method: 'POST',
       headers: {
         accept: 'application/json',
@@ -117,6 +119,7 @@ export class MailService {
     }
 
     const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      signal: AbortSignal.timeout(10_000),
       method: 'POST',
       headers: {
         accept: 'application/json',

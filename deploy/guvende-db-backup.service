@@ -1,0 +1,8 @@
+[Unit]
+Description=Guvende PostgreSQL production backup
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/enes/apps/guvende_backend
+ExecStart=/home/enes/apps/guvende_backend/scripts/backup-production-db.sh
