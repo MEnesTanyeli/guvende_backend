@@ -1,200 +1,212 @@
-# Güvende Backend — Basit Canlıya Hazırlık Rehberi
+# Güvende Backend — Canlıya Hazırlık Durumu
 
-Bu dosya, projede yeni olan biri için kısa yol haritasıdır. Teknik ayrıntılar gerektiğinde [teknik referans belgesine](./CANLIYA_HAZIRLIK_TEKNIK_REFERANS.md) bakabilirsin.
+Bu dosyada:
 
-## Şu anda sistem çalışıyor mu?
+- `+` işareti tamamlanan veya hazır olan işleri,
+- `-` işareti eksik, riskli veya yapılması gereken işleri gösterir.
 
-Evet.
+Eksileri yukarıdan aşağıya tek tek tamamlayacağız.
 
-- Backend adresi: `https://api.guvende.app`
-- Ubuntu sunucu çalışıyor.
-- Backend ve PostgreSQL Docker içinde çalışıyor.
-- Cloudflare Tunnel aktif.
-- Brevo e-posta sistemi bağlı.
-- Veritabanının günlük yerel yedeği ayarlandı.
+## + Hazır olanlar
 
-Ancak “çalışıyor” ile “canlıya tamamen hazır” aynı şey değildir.
++ Domain alındı: `guvende.app`
++ Backend adresi hazır: `https://api.guvende.app`
++ HTTPS aktif.
++ CGNAT sorunu Cloudflare Tunnel ile aşıldı.
++ Modemden port açmadan backend dışarı yayımlandı.
++ Cloudflare Tunnel kalıcı servis olarak çalışıyor.
++ Ubuntu 24.04 LTS sunucu çalışıyor.
++ Backend Docker container içinde çalışıyor.
++ PostgreSQL Docker container içinde çalışıyor.
++ PostgreSQL portu internete açık değil.
++ Backend yalnızca `127.0.0.1:3001` üzerinde dinliyor.
++ Docker container'larında otomatik yeniden başlatma var.
++ Prisma migration'ları veritabanıyla güncel.
++ Kullanıcı parolaları bcrypt ile hash'leniyor.
++ Kayıt e-posta doğrulama sistemi eklendi.
++ Şifre sıfırlama e-postası eklendi.
++ Kayıt ve şifre sıfırlama OTP'leri hash'leniyor.
++ OTP süre sınırı var.
++ OTP hatalı deneme sınırı var.
++ OTP gönderim sınırı var.
++ Brevo domain doğrulaması tamamlandı.
++ `mail.guvende.app` e-posta gönderimi için hazırlandı.
++ Güvensiz `purchase-mock` endpoint'i koddan kaldırıldı.
++ Konum test/simülasyon endpoint'leri koddan kaldırıldı.
++ HTTP ve WebSocket CORS whitelist hazırlandı.
++ HTTP güvenlik başlıkları hazırlandı.
++ Docker read-only ve capability güvenlik ayarları hazırlandı.
++ Docker RAM ve CPU sınırları hazırlandı.
++ Docker log rotation ayarları hazırlandı.
++ Backend health endpoint'i hazırlandı: `/health`
++ NPM güvenlik taraması temiz: `0 vulnerability`
++ Kod başarıyla derlendi.
++ Mevcut otomatik testler geçti.
++ Günlük PostgreSQL yedek script'i oluşturuldu.
++ İlk PostgreSQL yedeği alındı.
++ İlk yedeğin okunabilir olduğu doğrulandı.
++ Günlük backup timer aktif edildi.
++ Güvenlik değişiklikleri GitHub'a gönderildi.
 
-## Canlıya çıkmadan önce en önemli 5 iş
+## - Eksik olanlar
 
-### 1. Gizli anahtarları yenile
+### 1. - E-posta değiştirme OTP sistemi güvensiz
 
-Eskiden `.env` dosyası Git'e eklenmiş. Bu nedenle içindeki eski anahtarların başkası tarafından görülmüş olabileceğini kabul etmeliyiz.
+Şu anda e-posta değiştirme kodu:
 
-Yapılacaklar:
+- Açık biçimde veritabanında tutuluyor.
+- Backend log'una yazılıyor.
+- Gerçek e-posta ile gönderilmiyor.
+- Yeterli deneme ve gönderim sınırı yok.
 
-- JWT secret yenilenecek.
-- OneSignal REST API key yenilenecek.
-- Eski ve kullanılmayan anahtarlar silinecek.
+Yapacağımız iş:
 
-JWT secret yenilenince kullanıcıların tekrar giriş yapması normaldir.
+- Kodu bcrypt ile hash'lemek.
+- Log'dan tamamen kaldırmak.
+- Brevo ile kullanıcıya göndermek.
+- Süre, deneme ve yeniden gönderim sınırı eklemek.
 
-### 2. Yedeği başka bir yere de gönder
+### 2. - Git'e girmiş eski gizli anahtarlar yenilenmedi
 
-Günlük PostgreSQL yedeği hazırlandı fakat şu an aynı sunucunun diskinde tutuluyor.
+Geçmişte `.env` dosyası Git'e commit edilmiş.
 
-Sunucunun diski bozulursa hem veritabanı hem yerel yedek kaybolabilir. Bu nedenle yedeğin bir kopyası Cloudflare R2, Backblaze B2 veya başka bir güvenli depoya gönderilmeli.
+Yapacağımız iş:
 
-### 3. E-posta değiştirme kodunu düzelt
+- JWT secret'ı yenilemek.
+- OneSignal REST API key'i yenilemek.
+- Eski anahtarları iptal etmek.
+- Git geçmişini temizleyip temizlemeyeceğimize karar vermek.
 
-Kayıt ve şifre sıfırlama kodları güvenli şekilde hash'leniyor. Fakat e-posta değiştirme kodu hâlâ log'a yazılıyor ve açık biçimde saklanıyor.
+Not: JWT secret yenilenince mevcut kullanıcılar tekrar giriş yapmak zorunda kalır.
 
-Canlıdan önce:
+### 3. - Sertleştirilmiş yeni sürüm henüz canlı container'da değil
 
-- Kod hash'lenmeli.
-- Log'a yazılmamalı.
-- Kullanıcıya gerçek e-posta ile gönderilmeli.
-- Deneme ve süre limiti eklenmeli.
+Güvenlik kodları hazır ve GitHub'da. Fakat çalışan Docker container henüz eski image'ı kullanıyor.
 
-### 4. İzleme ve alarm kur
+Yapacağımız iş:
 
-Uygulama çöktüğünde bunu kullanıcı söylemeden öğrenmeliyiz.
+- Deploy öncesi yeni yedek almak.
+- Yeni Docker image oluşturmak.
+- Backend container'ını güncellemek.
+- `/health` kontrolü yapmak.
+- Kayıt, giriş, e-posta ve konum smoke testleri yapmak.
 
-En azından şu kontroller gerekli:
+### 4. - Yedek aynı fiziksel diskte
 
-- `api.guvende.app` çalışıyor mu?
-- Docker container yeniden başladı mı?
-- Disk doluyor mu?
-- Günlük yedek başarılı mı?
-- Backend hata oranı arttı mı?
+Günlük yedek var fakat Ubuntu sunucusunun kendi diskinde.
 
-Başlangıç için Uptime Kuma ve Sentry kullanılabilir.
+Risk:
 
-### 5. Gerçek senaryoları test et
+- Disk bozulursa veritabanı ve yedek birlikte kaybolabilir.
+- Cihaz çalınır veya zarar görürse yedek de kaybolur.
 
-Mevcut otomatik test sayısı çok az. Aşağıdaki işlemleri test etmeliyiz:
+Yapacağımız iş:
 
-- Yeni kullanıcı kaydı
-- E-posta doğrulama kodu
-- Giriş
+- Cloudflare R2 veya Backblaze B2 hesabı açmak.
+- Yedekleri şifreli şekilde dış depoya göndermek.
+- Otomatik silme/retention kuralı koymak.
+- Gerçek geri yükleme testi yapmak.
+
+### 5. - Uptime ve hata izleme sistemi yok
+
+Backend çökerse şu anda otomatik bildirim gelmiyor.
+
+Yapacağımız iş:
+
+- Uptime Kuma veya harici uptime servisi kurmak.
+- `https://api.guvende.app/health` adresini izlemek.
+- Sentry ile backend hatalarını toplamak.
+- Disk doluluk alarmı eklemek.
+- Backup başarısızlık alarmı eklemek.
+
+### 6. - Otomatik test sayısı yetersiz
+
+Mevcut testler yalnızca temel örnek seviyesinde.
+
+Eklememiz gereken testler:
+
+- Kayıt ve e-posta doğrulama
+- Login
 - Şifre sıfırlama
+- OTP brute-force koruması
 - Aile oluşturma ve aileye katılma
 - Başka ailenin verisine erişememe
-- Konum gönderme ve görüntüleme
-- WebSocket bağlantısı
-- Push bildirim
-- Yedekten geri yükleme
+- Admin yetkilendirmesi
+- Premium yetkilendirmesi
+- Konum erişim yetkileri
+- WebSocket aile odası yetkilendirmesi
+- Brevo hata senaryosu
+- Backup ve restore
 
-## Şimdiye kadar ne yaptık?
+### 7. - UFW ve SSH güvenlik kontrolü tamamlanmadı
 
-- `guvende.app` domaini alındı.
-- `api.guvende.app` backend'e bağlandı.
-- CGNAT, Cloudflare Tunnel ile aşıldı.
-- HTTPS aktif edildi.
-- Brevo domain doğrulaması yapıldı.
-- Kayıt ve şifre sıfırlama e-postaları eklendi.
-- OTP gönderim ve deneme limitleri eklendi.
-- Güvensiz premium test endpoint'i kaldırıldı.
-- Konum simülasyon endpoint'leri kaldırıldı.
-- CORS yalnızca izin verilen adreslerle sınırlandı.
-- Docker güvenlik ayarları hazırlandı.
-- HTTP güvenlik başlıkları hazırlandı.
-- Bağımlılık güvenlik taraması temizlendi.
-- Günlük PostgreSQL yedeği kuruldu.
-- İlk yedek oluşturulup okunabildiği doğrulandı.
+Kontrol edilmesi gerekenler:
 
-## Henüz canlıya uygulanmayan değişiklik
+- UFW aktif mi?
+- SSH yalnızca anahtarla mı çalışıyor?
+- SSH parola girişi kapalı mı?
+- Root ile SSH girişi kapalı mı?
+- SSH yalnızca LAN/Tailscale üzerinden sınırlandırılabilir mi?
+- Ubuntu otomatik güvenlik güncellemeleri açık mı?
 
-Güvenlik düzenlemelerinin kodu hazırlandı, test edildi ve GitHub'a gönderildi. Fakat yeni Docker image henüz production'da başlatılmadı.
+### 8. - Gerçek ödeme doğrulaması yok
 
-Bu bilinçli olarak durduruldu. Önce değişiklikleri anlamak, sonra kontrollü deploy yapmak daha güvenlidir.
+Test amaçlı premium endpoint'i kaldırıldı fakat gerçek ödeme sistemi henüz yok.
 
-## Bundan sonra hangi sırayla ilerleyeceğiz?
+Yapacağımız iş:
 
-1. E-posta değiştirme OTP güvenliğini düzelt.
-2. JWT secret ve OneSignal anahtarını yenile.
-3. Güncel veritabanı yedeği al.
-4. Yeni Docker image oluştur.
-5. Backend container'ını yeniden başlat.
-6. Health check'i bekle.
-7. Kayıt, giriş, e-posta ve konum testlerini yap.
-8. Logları kontrol et.
-9. Sorun yoksa sürümü canlı kabul et.
-10. Off-site yedek ve izleme sistemini kur.
+- Google Play satın alma doğrulaması.
+- App Store satın alma doğrulaması.
+- Sunucu tarafında receipt/token kontrolü.
+- İade ve abonelik iptali durumlarının yönetimi.
 
-## Bir deploy nasıl yapılır?
+### 9. - Token/session sistemi geliştirilmeli
 
-Temel komutlar şunlardır:
+Şu anda JWT ile giriş çalışıyor fakat gelişmiş session yönetimi yok.
 
-```bash
-cd ~/apps/guvende_backend
+İleride yapılacaklar:
 
-# Önce yedek
-bash scripts/backup-production-db.sh
+- Kısa ömürlü access token.
+- Refresh token rotasyonu.
+- Tüm cihazlardan çıkış.
+- Çalınan token'ı iptal etme.
+- Admin hesapları için ek güvenlik/MFA.
 
-# Yeni image oluştur ve backend'i güncelle
-docker compose --env-file .env.production -f docker-compose.prod.yml build backend
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d backend
+### 10. - Ev sunucusunda tek nokta arızası var
 
-# Durumu kontrol et
-docker compose --env-file .env.production -f docker-compose.prod.yml ps
-curl -i https://api.guvende.app/health
+Elektrik, internet, modem, disk veya bilgisayar arızalanırsa bütün sistem durur.
+
+İleride değerlendirilecekler:
+
+- UPS.
+- İkinci disk veya ikinci cihaz.
+- VPS failover.
+- Yönetilen PostgreSQL.
+- Düzenli felaket kurtarma testi.
+
+## Yapacağımız sıra
+
+1. E-posta değiştirme OTP güvenliği
+2. Gizli anahtarların yenilenmesi
+3. Sertleştirilmiş sürümün canlı deploy'u
+4. Canlı smoke testleri
+5. Off-site yedek
+6. Uptime ve hata izleme
+7. UFW ve SSH güvenliği
+8. Kritik otomatik testler
+9. Gerçek ödeme doğrulaması
+10. Gelişmiş token/session sistemi
+
+## Şu anki karar
+
+İlk kapatacağımız eksi:
+
+```text
+1. E-posta değiştirme OTP güvenliği
 ```
 
-Bu komutları körlemesine çalıştırmayacağız. Her adımdan sonra çıktıyı kontrol edeceğiz.
+Bu tamamlanınca satırı `-` listesinden çıkarıp `+ Hazır olanlar` listesine taşıyacağız.
 
-## Sorun olursa nasıl geri döneriz?
-
-Temel rollback mantığı:
-
-1. Hatalı sürümün loglarını kaydet.
-2. Bir önceki sağlam Git commit'ine dön.
-3. Önceki Docker image'ını yeniden oluştur.
-4. Gerekirse veritabanını yedekten geri yükle.
-5. Health check ve temel kullanıcı işlemlerini yeniden test et.
-
-Veritabanı migration'ı varsa kodu geri almak tek başına yeterli olmayabilir. Bu yüzden migration öncesi yedek zorunludur.
-
-## Basit kavram sözlüğü
-
-**Backend:** Mobil uygulamanın veri aldığı ve işlem yaptırdığı sunucu uygulaması.
-
-**Domain:** IP adresi yerine kullanılan isim. Örnek: `api.guvende.app`.
-
-**Cloudflare Tunnel:** Modemden port açmadan backend'i internete bağlayan güvenli dış bağlantı.
-
-**Docker container:** Uygulamayı bağımlılıklarıyla izole biçimde çalıştıran ortam.
-
-**PostgreSQL:** Kullanıcılar, aileler, konumlar ve diğer verilerin tutulduğu veritabanı.
-
-**JWT:** Kullanıcının giriş yaptığını kanıtlayan imzalı token.
-
-**Secret/API key:** Uygulamanın servislerle güvenli iletişim kurmasını sağlayan gizli anahtar.
-
-**CORS:** Hangi web adreslerinin API'ye tarayıcı üzerinden ulaşabileceğini belirleyen kural.
-
-**OTP:** Tek kullanımlık doğrulama kodu.
-
-**Migration:** Veritabanı yapısında kontrollü değişiklik.
-
-**Backup:** Veri kaybında geri yüklemek için alınan veritabanı kopyası.
-
-**Health check:** Uygulamanın çalışıp çalışmadığını otomatik kontrol eden istek.
-
-**Deploy:** Hazırlanan yeni kod sürümünü çalışan sunucuya alma işlemi.
-
-**Rollback:** Sorunlu deploy'dan önceki sağlam sürüme geri dönme işlemi.
-
-## Kısa kontrol listesi
-
-- [x] Domain ve HTTPS
-- [x] Cloudflare Tunnel
-- [x] Docker ve PostgreSQL
-- [x] E-posta gönderimi
-- [x] Yerel günlük yedek
-- [x] Bağımlılık güvenlik taraması
-- [ ] E-posta değiştirme OTP güvenliği
-- [ ] Secret rotasyonu
-- [ ] Sertleştirilmiş sürümün deploy'u
-- [ ] Uçtan uca testler
-- [ ] Off-site yedek
-- [ ] Uptime ve hata izleme
-- [ ] UFW ve SSH güvenlik kontrolü
-
-## Özet
-
-Sistem iyi bir temel üzerinde çalışıyor fakat birkaç kritik operasyon işi tamamlanmadan gerçek kullanıcı trafiğine açılmamalı. Önceliğimiz özellik eklemek değil; secret, yedek, test, izleme ve güvenli deploy düzenini tamamlamak.
-
-Ayrıntılı teknik açıklamalar için:
+Teknik ayrıntılar için:
 
 [CANLIYA_HAZIRLIK_TEKNIK_REFERANS.md](./CANLIYA_HAZIRLIK_TEKNIK_REFERANS.md)
