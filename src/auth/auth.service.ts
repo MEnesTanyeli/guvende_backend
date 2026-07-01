@@ -94,11 +94,6 @@ export class AuthService {
       where: { email: cleanedEmail },
     }).catch(() => {});
 
-    try {
-      await this.mailService.sendWelcomeEmail(user.email, user.name);
-    } catch (error) {
-      console.error('Hos geldiniz e-postasi gonderilemedi:', error);
-    }
 
     const token = this.generateToken(user.id, user.email);
     const userProfile = await this.usersService.findOne(user.id);
