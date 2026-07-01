@@ -1,4 +1,11 @@
-import { Body, Controller, Get, Post, UseGuards, BadRequestException } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  UseGuards,
+  BadRequestException,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -6,6 +13,7 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { GetUser } from './decorators/get-user.decorator';
 import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
 import { Throttle } from '@nestjs/throttler';
+import { RefreshTokenDto } from './dto/session.dto';
 
 class ForgotPasswordDto {
   @IsEmail({}, { message: 'Geçerli bir e-posta adresi giriniz.' })
@@ -56,6 +64,24 @@ export class AuthController {
   @Post('admin/login')
   async adminLogin(@Body() dto: LoginDto) {
     return this.authService.adminLogin(dto);
+  }
+
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Post('refresh')
+  async refresh(@Body() dto: RefreshTokenDto) {
+    return this.authService.refresh(dto.refreshToken);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('logout')
+  async logout(@GetUser() user: any) {
+    return this.authService.logout(user.sessionId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('logout-all')
+  async logoutAll(@GetUser() user: any) {
+    return this.authService.logoutAll(user.id);
   }
 
   @Throttle({ default: { limit: 10, ttl: 15 * 60_000 } })

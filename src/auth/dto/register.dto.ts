@@ -1,4 +1,11 @@
-import { IsEmail, IsNotEmpty, IsOptional, IsString, MinLength, IsIn } from 'class-validator';
+import {
+  IsEmail,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MinLength,
+  IsIn,
+} from 'class-validator';
 
 export class RegisterDto {
   @IsEmail({}, { message: 'Geçerli bir e-posta adresi giriniz.' })
@@ -20,7 +27,9 @@ export class RegisterDto {
 
   @IsString()
   @IsOptional()
-  @IsIn(['guardian', 'child', 'elder'], { message: 'Geçersiz hesap türü seçildi.' })
+  @IsIn(['guardian', 'child', 'elder'], {
+    message: 'Geçersiz hesap türü seçildi.',
+  })
   role?: string;
 
   @IsString()
@@ -31,4 +40,8 @@ export class RegisterDto {
   @IsString()
   @IsNotEmpty({ message: 'Doğrulama kodu boş bırakılamaz.' })
   code: string;
+
+  @IsString()
+  @IsOptional()
+  deviceId?: string;
 }

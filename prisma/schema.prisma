@@ -30,62 +30,82 @@ enum AlertStatus {
 }
 
 model User {
-  id                String             @id @default(uuid())
-  name              String
-  email             String             @unique
-  phone             String?
-  gender            String?
-  passwordHash      String
-  role              String             @default("guardian")
-  trialEndsAt       DateTime           @default(now())
-  isPremium         Boolean            @default(false)
-  premiumExpiresAt  DateTime?
-  isLocked          Boolean            @default(false)
-  deviceId          String?
-  loginAllowed      Boolean            @default(false)
-  proxyId           String?
-  proxy             User?              @relation("UserProxy", fields: [proxyId], references: [id])
-  proxiedBy         User[]             @relation("UserProxy")
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  familiesOwned     Family[]           @relation("FamilyOwner")
-  memberships       FamilyMember[]
-  locations         Location[]
-  alerts            Alert[]
-  sosEvents         SosEvent[]
-  activitySnapshots ActivitySnapshot[]
-  medicationReminders MedicationReminder[]
-  appUsages           AppUsage[]
-  resetOtpCode             String?
-  resetOtpExpiresAt        DateTime?
-  resetOtpFailedAttempts   Int                @default(0)
-  resetOtpBlockedUntil     DateTime?
-  resetOtpLastSentAt       DateTime?
-  resetOtpHourlySendCount  Int                @default(0)
+  id                        String               @id @default(uuid())
+  name                      String
+  email                     String               @unique
+  phone                     String?
+  gender                    String?
+  passwordHash              String
+  role                      String               @default("guardian")
+  trialEndsAt               DateTime             @default(now())
+  isPremium                 Boolean              @default(false)
+  premiumExpiresAt          DateTime?
+  isLocked                  Boolean              @default(false)
+  deviceId                  String?
+  loginAllowed              Boolean              @default(false)
+  proxyId                   String?
+  proxy                     User?                @relation("UserProxy", fields: [proxyId], references: [id])
+  proxiedBy                 User[]               @relation("UserProxy")
+  createdAt                 DateTime             @default(now())
+  updatedAt                 DateTime             @updatedAt
+  familiesOwned             Family[]             @relation("FamilyOwner")
+  memberships               FamilyMember[]
+  locations                 Location[]
+  alerts                    Alert[]
+  sosEvents                 SosEvent[]
+  activitySnapshots         ActivitySnapshot[]
+  medicationReminders       MedicationReminder[]
+  appUsages                 AppUsage[]
+  resetOtpCode              String?
+  resetOtpExpiresAt         DateTime?
+  resetOtpFailedAttempts    Int                  @default(0)
+  resetOtpBlockedUntil      DateTime?
+  resetOtpLastSentAt        DateTime?
+  resetOtpHourlySendCount   Int                  @default(0)
   resetOtpHourlyWindowStart DateTime?
-  resetOtpDailySendCount   Int                @default(0)
-  resetOtpDailyWindowStart DateTime?
-  emailChangeOtpCode       String?
-  emailChangeNewEmail      String?
-  emailChangeOtpExpiresAt  DateTime?
-  devicePermissions        Json?
+  resetOtpDailySendCount    Int                  @default(0)
+  resetOtpDailyWindowStart  DateTime?
+  emailChangeOtpCode        String?
+  emailChangeNewEmail       String?
+  emailChangeOtpExpiresAt   DateTime?
+  devicePermissions         Json?
+  sessions                  Session[]
 
   @@map("users")
 }
 
+model Session {
+  id                  String    @id @default(uuid())
+  userId              String
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenFamilyId       String
+  refreshTokenHash    String    @unique
+  deviceId            String?
+  expiresAt           DateTime
+  lastUsedAt          DateTime  @default(now())
+  revokedAt           DateTime?
+  replacedByTokenHash String?
+  createdAt           DateTime  @default(now())
+
+  @@index([userId, revokedAt])
+  @@index([userId, tokenFamilyId, revokedAt])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
 model Family {
-  id          String         @id @default(uuid())
-  inviteCode  String?        @unique
-  name        String
-  type        String         @default("children")
-  ownerId     String
-  owner       User           @relation("FamilyOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  members     FamilyMember[]
-  safeZones   SafeZone[]
-  alerts      Alert[]
-  sosEvents   SosEvent[]
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  id         String         @id @default(uuid())
+  inviteCode String?        @unique
+  name       String
+  type       String         @default("children")
+  ownerId    String
+  owner      User           @relation("FamilyOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members    FamilyMember[]
+  safeZones  SafeZone[]
+  alerts     Alert[]
+  sosEvents  SosEvent[]
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
 
   @@map("families")
 }
@@ -129,7 +149,7 @@ model SafeZone {
   name      String
   latitude  Float
   longitude Float
-  radius    Float    // metre cinsinden
+  radius    Float // metre cinsinden
   createdBy String
   createdAt DateTime @default(now())
 
@@ -159,7 +179,7 @@ model SosEvent {
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   familyId  String
-  family     Family      @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  family    Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
   latitude  Float
   longitude Float
   message   String?
@@ -188,7 +208,7 @@ model MedicationReminder {
   user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   medicationName String
   dosage         String
-  time           String    // Örn: "08:30"
+  time           String // Örn: "08:30"
   isActive       Boolean   @default(true)
   lastTakenAt    DateTime?
   reminderType   String    @default("medication")
@@ -204,9 +224,9 @@ model AppUsage {
   id           String   @id @default(uuid())
   userId       String
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  packageName  String   // Örn: "com.whatsapp"
-  appName      String   // Örn: "WhatsApp"
-  durationMin  Int      // Dakika cinsinden kullanım süresi
+  packageName  String // Örn: "com.whatsapp"
+  appName      String // Örn: "WhatsApp"
+  durationMin  Int // Dakika cinsinden kullanım süresi
   lastUsedAt   DateTime @default(now())
   recordedDate DateTime // Günlük bazda gruplamak için (saat bilgisi sıfırlanmış tarih)
 
@@ -215,19 +235,19 @@ model AppUsage {
 }
 
 model EmailVerification {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  code      String
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  failedAttempts Int @default(0)
-  blockedUntil DateTime?
-  lastSentAt DateTime @default(now())
-  hourlySendCount Int @default(1)
-  hourlyWindowStart DateTime @default(now())
-  dailySendCount Int @default(1)
-  dailyWindowStart DateTime @default(now())
+  id                String    @id @default(uuid())
+  email             String    @unique
+  code              String
+  expiresAt         DateTime
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  failedAttempts    Int       @default(0)
+  blockedUntil      DateTime?
+  lastSentAt        DateTime  @default(now())
+  hourlySendCount   Int       @default(1)
+  hourlyWindowStart DateTime  @default(now())
+  dailySendCount    Int       @default(1)
+  dailyWindowStart  DateTime  @default(now())
 
   @@map("email_verifications")
 }

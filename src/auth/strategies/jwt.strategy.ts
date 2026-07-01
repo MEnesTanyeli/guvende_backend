@@ -13,11 +13,36 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: configService.get<string>('JWT_SECRET') || 'guvende_gizli_anahtar_uretimde_degistirin',
+      secretOrKey:
+        configService.get<string>('JWT_SECRET') ||
+        'guvende_gizli_anahtar_uretimde_degistirin',
     });
   }
 
-  async validate(payload: { sub: string; email: string }) {
+  async validate(payload: {
+    sub: string;
+    email: string;
+    sid?: string;
+    typ?: string;
+  }) {
+    if (!payload.sid || payload.typ !== 'access') {
+      throw new UnauthorizedException('Geçersiz veya eski oturum tokenı.');
+    }
+
+    const session = await this.prisma.session.findFirst({
+      where: {
+        id: payload.sid,
+        userId: payload.sub,
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      select: { id: true },
+    });
+
+    if (!session) {
+      throw new UnauthorizedException('Oturum kapatılmış veya süresi dolmuş.');
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
       select: {
@@ -34,6 +59,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Geçersiz kimlik bilgileri.');
     }
 
-    return user;
+    return { ...user, sessionId: session.id };
   }
 }

@@ -16,7 +16,12 @@ export class CronService {
   ) {}
 
   // Mesafe hesabı için Haversine Formülü
-  private getDistanceInMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  private getDistanceInMeters(
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number,
+  ): number {
     const R = 6371000; // Dünya yarıçapı (metre)
     const dLat = (lat2 - lat1) * (Math.PI / 180);
     const dLon = (lon2 - lon1) * (Math.PI / 180);
@@ -33,7 +38,9 @@ export class CronService {
   // 1. Bağlantı Kesildi Kontrolü (Her 2 dakikada bir çalışır)
   @Cron('0 */2 * * * *')
   async handleConnectionLostCheck() {
-    this.logger.log('Bağlantı kesildi kontrolü zamanlanmış görevi başlatılıyor...');
+    this.logger.log(
+      'Bağlantı kesildi kontrolü zamanlanmış görevi başlatılıyor...',
+    );
 
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
 
@@ -74,7 +81,9 @@ export class CronService {
             where: { id: lastLocation.id },
             data: { connectionStatus: 'offline' },
           });
-          this.logger.log(`Kullanıcı (${userName} - ${userId}) cihazı uzun süredir konum göndermediği için çevrimdışı durumuna güncellendi.`);
+          this.logger.log(
+            `Kullanıcı (${userName} - ${userId}) cihazı uzun süredir konum göndermediği için çevrimdışı durumuna güncellendi.`,
+          );
         }
 
         // Zaten aktif/çözülmemiş bir bağlantı koptu uyarısı var mı?
@@ -112,7 +121,9 @@ export class CronService {
               { type: 'connection_lost', userId },
             );
           }
-          this.logger.warn(`${userName} (${userId}) için bağlantı koptu alarmı oluşturuldu.`);
+          this.logger.warn(
+            `${userName} (${userId}) için bağlantı koptu alarmı oluşturuldu.`,
+          );
         }
       }
     }
@@ -122,7 +133,9 @@ export class CronService {
   // 2. Hareketsizlik Kontrolü (Her 30 dakikada bir çalışır)
   @Cron('0 */30 * * * *')
   async handleInactivityCheck() {
-    this.logger.log('Hareketsizlik kontrolü zamanlanmış görevi başlatılıyor...');
+    this.logger.log(
+      'Hareketsizlik kontrolü zamanlanmış görevi başlatılıyor...',
+    );
 
     const eightHoursAgo = new Date(Date.now() - 8 * 60 * 60 * 1000);
     const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
@@ -157,10 +170,12 @@ export class CronService {
       if (
         locations.length >= 2 &&
         locations[0].recordedAt >= thirtyMinutesAgo &&
-        (locations[0].recordedAt.getTime() - locations[locations.length - 1].recordedAt.getTime() >= 7.5 * 60 * 60 * 1000)
+        locations[0].recordedAt.getTime() -
+          locations[locations.length - 1].recordedAt.getTime() >=
+          7.5 * 60 * 60 * 1000
       ) {
         const latestLoc = locations[0];
-        
+
         // Son 8 saatteki tüm noktalar son noktaya 20 metreden yakın mı?
         const isInactive = locations.every((loc) => {
           const distance = this.getDistanceInMeters(
@@ -212,7 +227,9 @@ export class CronService {
                 { type: 'inactivity', userId },
               );
             }
-            this.logger.warn(`${userName} (${userId}) için hareketsizlik alarmı oluşturuldu.`);
+            this.logger.warn(
+              `${userName} (${userId}) için hareketsizlik alarmı oluşturuldu.`,
+            );
           }
         }
       }
@@ -223,7 +240,9 @@ export class CronService {
   // 3. İlaç Hatırlatıcı Kontrolü (Her dakika çalışır)
   @Cron('0 * * * * *')
   async handleMedicationReminderCheck() {
-    this.logger.log('İlaç hatırlatıcı kontrolü zamanlanmış görevi başlatılıyor...');
+    this.logger.log(
+      'İlaç hatırlatıcı kontrolü zamanlanmış görevi başlatılıyor...',
+    );
 
     const localTime = new Date().toLocaleTimeString('tr-TR', {
       hour12: false,
@@ -243,22 +262,34 @@ export class CronService {
     });
 
     // Filtreleme: Başlangıç tarihi (startDate) ve Tekrar Gün Sayısı (repeatDays)
-    const nowInIstanbul = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Istanbul' }));
-    const today = new Date(nowInIstanbul.getFullYear(), nowInIstanbul.getMonth(), nowInIstanbul.getDate());
+    const nowInIstanbul = new Date(
+      new Date().toLocaleString('en-US', { timeZone: 'Europe/Istanbul' }),
+    );
+    const today = new Date(
+      nowInIstanbul.getFullYear(),
+      nowInIstanbul.getMonth(),
+      nowInIstanbul.getDate(),
+    );
 
-    const filteredReminders = activeReminders.filter(reminder => {
+    const filteredReminders = activeReminders.filter((reminder) => {
       const start = new Date(reminder.startDate);
-      const startDateOnly = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-      
+      const startDateOnly = new Date(
+        start.getFullYear(),
+        start.getMonth(),
+        start.getDate(),
+      );
+
       // Gelecek tarihli ise tetikleme
       if (startDateOnly > today) {
         return false;
       }
-      
+
       // Tekrar gün sınırı varsa kontrol et (Boş/Null ise sınırsız)
       if (reminder.repeatDays && reminder.repeatDays > 0) {
         const msPerDay = 24 * 60 * 60 * 1000;
-        const diffDays = Math.round((today.getTime() - startDateOnly.getTime()) / msPerDay);
+        const diffDays = Math.round(
+          (today.getTime() - startDateOnly.getTime()) / msPerDay,
+        );
         if (diffDays >= reminder.repeatDays) {
           return false; // Tekrar süresi dolmuş
         }
@@ -267,22 +298,32 @@ export class CronService {
     });
 
     if (filteredReminders.length > 0) {
-      this.logger.log(`Saat ${localTime} için ${filteredReminders.length} adet aktif hatırlatıcı tetikleniyor.`);
+      this.logger.log(
+        `Saat ${localTime} için ${filteredReminders.length} adet aktif hatırlatıcı tetikleniyor.`,
+      );
     }
 
     for (const reminder of filteredReminders) {
-      const sent = this.locationsGateway.sendEventToUser(reminder.userId, 'medication_reminder_trigger', {
-        reminderId: reminder.id,
-        medicationName: reminder.medicationName,
-        dosage: reminder.dosage,
-        time: reminder.time,
-        reminderType: reminder.reminderType,
-      });
+      const sent = this.locationsGateway.sendEventToUser(
+        reminder.userId,
+        'medication_reminder_trigger',
+        {
+          reminderId: reminder.id,
+          medicationName: reminder.medicationName,
+          dosage: reminder.dosage,
+          time: reminder.time,
+          reminderType: reminder.reminderType,
+        },
+      );
 
       if (sent) {
-        this.logger.log(`Hatırlatıcı alarmı (${reminder.medicationName} - ${reminder.reminderType}) kullanıcıya (${reminder.user.name}) iletildi.`);
+        this.logger.log(
+          `Hatırlatıcı alarmı (${reminder.medicationName} - ${reminder.reminderType}) kullanıcıya (${reminder.user.name}) iletildi.`,
+        );
       } else {
-        this.logger.warn(`Kullanıcı (${reminder.user.name}) çevrimdışı olduğu için hatırlatıcı alarmı iletilemedi.`);
+        this.logger.warn(
+          `Kullanıcı (${reminder.user.name}) çevrimdışı olduğu için hatırlatıcı alarmı iletilemedi.`,
+        );
       }
     }
   }
@@ -300,7 +341,9 @@ export class CronService {
       select: { userId: true },
     });
 
-    const uniqueUserIds = Array.from(new Set(activeMembers.map((m) => m.userId)));
+    const uniqueUserIds = Array.from(
+      new Set(activeMembers.map((m) => m.userId)),
+    );
 
     for (const userId of uniqueUserIds) {
       // Eğer kullanıcı şu an WebSocket ile bağlıysa ping göndermeye gerek yok
@@ -315,8 +358,14 @@ export class CronService {
       });
 
       // Eğer son konum 7 ila 15 dakika arasındaysa, hala açık ama hareketsiz olabilir. Ping gönder.
-      if (lastLocation && lastLocation.recordedAt < sevenMinutesAgo && lastLocation.recordedAt > fifteenMinutesAgo) {
-        this.logger.log(`Kullanıcı (${userId}) için sessiz ping bildirimi gönderiliyor...`);
+      if (
+        lastLocation &&
+        lastLocation.recordedAt < sevenMinutesAgo &&
+        lastLocation.recordedAt > fifteenMinutesAgo
+      ) {
+        this.logger.log(
+          `Kullanıcı (${userId}) için sessiz ping bildirimi gönderiliyor...`,
+        );
         await this.locationsGateway.sendSilentPushNotification([userId], {
           action: 'ping',
         });
@@ -328,7 +377,9 @@ export class CronService {
   // 5. Eski Konum Kayıtlarını Temizleme (Her gece saat 03:00'te çalışır)
   @Cron('0 0 3 * * *')
   async handleLocationsCleanup() {
-    this.logger.log('Eski konum kayıtlarını temizleme zamanlanmış görevi başlatılıyor...');
+    this.logger.log(
+      'Eski konum kayıtlarını temizleme zamanlanmış görevi başlatılıyor...',
+    );
 
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
@@ -341,9 +392,32 @@ export class CronService {
         },
       });
 
-      this.logger.log(`Eski konum temizliği tamamlandı. Toplam silinen konum kaydı: ${deleteResult.count}`);
+      this.logger.log(
+        `Eski konum temizliği tamamlandı. Toplam silinen konum kaydı: ${deleteResult.count}`,
+      );
     } catch (error) {
-      this.logger.error(`Eski konum kayıtları temizlenirken hata oluştu: ${error.message}`);
+      this.logger.error(
+        `Eski konum kayıtları temizlenirken hata oluştu: ${error.message}`,
+      );
+    }
+  }
+
+  // Süresi uzun zaman önce dolmuş session kayıtlarını her gece temizle.
+  // Yakın tarihli iptal kayıtları refresh-token tekrar kullanımını tespit etmek için korunur.
+  @Cron('0 30 3 * * *')
+  async handleSessionsCleanup() {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    try {
+      const deleteResult = await this.prisma.session.deleteMany({
+        where: { expiresAt: { lt: thirtyDaysAgo } },
+      });
+      this.logger.log(
+        `Eski session temizliği tamamlandı. Silinen kayıt: ${deleteResult.count}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Eski session kayıtları temizlenirken hata oluştu: ${error.message}`,
+      );
     }
   }
 }

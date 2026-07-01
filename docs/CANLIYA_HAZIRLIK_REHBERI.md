@@ -55,6 +55,13 @@ Eksileri yukarıdan aşağıya tek tek tamamlayacağız.
 + Backend ve PostgreSQL container'ları deploy sonrasında sağlıklı çalıştı.
 + Public `/health` kontrolü `200` döndü.
 + Login, CORS, WebSocket ve push smoke kontrolleri yapıldı.
++ Kritik akışlar için 27 otomatik test yazıldı ve tamamı geçti.
++ Son PostgreSQL yedeği geçici veritabanına başarıyla geri yüklendi.
++ UFW aktif edildi; varsayılan gelen bağlantı politikası engelleme olarak ayarlandı.
++ SSH yalnızca LAN (`192.168.1.0/24`) ve Tailscale (`100.64.0.0/10`) ağlarından erişime açıldı.
++ SSH parola ve klavye-etkileşimli girişi kapatıldı; yalnızca anahtar girişi açık.
++ SSH üzerinden doğrudan root girişi kapatıldı.
++ Ubuntu otomatik güvenlik güncellemeleri aktif ve sistem açılışında etkin.
 
 ## - Eksik olanlar
 
@@ -90,37 +97,7 @@ Yapacağımız iş:
 - Disk doluluk alarmı eklemek.
 - Backup başarısızlık alarmı eklemek.
 
-### 3. - Otomatik test sayısı yetersiz
-
-Mevcut testler yalnızca temel örnek seviyesinde.
-
-Eklememiz gereken testler:
-
-- Kayıt ve e-posta doğrulama
-- Login
-- Şifre sıfırlama
-- OTP brute-force koruması
-- Aile oluşturma ve aileye katılma
-- Başka ailenin verisine erişememe
-- Admin yetkilendirmesi
-- Premium yetkilendirmesi
-- Konum erişim yetkileri
-- WebSocket aile odası yetkilendirmesi
-- Brevo hata senaryosu
-- Backup ve restore
-
-### 4. - UFW ve SSH güvenlik kontrolü tamamlanmadı
-
-Kontrol edilmesi gerekenler:
-
-- UFW aktif mi?
-- SSH yalnızca anahtarla mı çalışıyor?
-- SSH parola girişi kapalı mı?
-- Root ile SSH girişi kapalı mı?
-- SSH yalnızca LAN/Tailscale üzerinden sınırlandırılabilir mi?
-- Ubuntu otomatik güvenlik güncellemeleri açık mı?
-
-### 5. - Gerçek ödeme doğrulaması yok
+### 3. - Gerçek ödeme doğrulaması yok
 
 Test amaçlı premium endpoint'i kaldırıldı fakat gerçek ödeme sistemi henüz yok.
 
@@ -131,19 +108,30 @@ Yapacağımız iş:
 - Sunucu tarafında receipt/token kontrolü.
 - İade ve abonelik iptali durumlarının yönetimi.
 
-### 6. - Token/session sistemi geliştirilmeli
+### 4. - Token/session sistemi geliştirilmeli
 
-Şu anda JWT ile giriş çalışıyor fakat gelişmiş session yönetimi yok.
+Durum: Backend kodu yerelde hazırlandı ve test edildi; henüz commit/deploy edilmedi. Frontend entegrasyonu tamamlandıktan sonra production'a alınacak.
 
-İleride yapılacaklar:
+Hazırlananlar:
 
-- Kısa ömürlü access token.
-- Refresh token rotasyonu.
-- Tüm cihazlardan çıkış.
-- Çalınan token'ı iptal etme.
-- Admin hesapları için ek güvenlik/MFA.
+- 15 dakikalık access token.
+- 30 günlük ve her kullanımda değişen refresh token.
+- Tek cihazdan ve tüm cihazlardan çıkış.
+- Çalınan/eski refresh token tekrar kullanımında ilgili cihazın session ailesini iptal etme.
+- Her cihaz için ayrı token ailesi ve cihaz bazlı iptal.
+- Eşzamanlı yenilemeler için 3 saniyelik güvenli tolerans ve `409 REFRESH_ALREADY_ROTATED` sözleşmesi.
+- HTTP ve WebSocket session doğrulaması.
+- Şifre değişince tüm session'ları kapatma.
+- Frontend ve Android Java token yenileme entegrasyonu.
 
-### 7. - Ev sunucusunda tek nokta arızası var
+Kalanlar:
+
+- Production migration ve deploy.
+- Admin hesapları için MFA (admin paneli canlıya açılmadan önce).
+
+Frontend sözleşmesi: [FRONTEND_OTURUM_ENTEGRASYONU.md](./FRONTEND_OTURUM_ENTEGRASYONU.md)
+
+### 5. - Ev sunucusunda tek nokta arızası var
 
 Elektrik, internet, modem, disk veya bilgisayar arızalanırsa bütün sistem durur.
 
@@ -157,10 +145,8 @@ Elektrik, internet, modem, disk veya bilgisayar arızalanırsa bütün sistem du
 
 ## Yapacağımız sıra
 
-1. UFW ve SSH güvenliği
-2. Kritik otomatik testler
-3. Gerçek ödeme doğrulaması
-4. Gelişmiş token/session sistemi
+1. Gerçek ödeme doğrulaması
+2. Gelişmiş token/session sistemi
 
 Canlı öncesine ertelenen zorunlu işler:
 
@@ -169,13 +155,13 @@ Canlı öncesine ertelenen zorunlu işler:
 
 ## Şu anki karar
 
-İlk kapatacağımız eksi:
+Sıradaki kapatacağımız eksi:
 
 ```text
-1. UFW ve SSH güvenliği
+1. Gerçek ödeme doğrulaması
 ```
 
-Bu tamamlanınca satırı `-` listesinden çıkarıp `+ Hazır olanlar` listesine taşıyacağız.
+UFW/SSH güvenliği ve kritik otomatik testler tamamlandı; commit ve push işlemi diğer yerel değişikliklerle birlikte daha sonra toplu yapılacak.
 
 Teknik ayrıntılar için:
 

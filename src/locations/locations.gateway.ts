@@ -21,7 +21,9 @@ import * as https from 'https';
       .filter(Boolean),
   },
 })
-export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class LocationsGateway
+  implements OnGatewayConnection, OnGatewayDisconnect
+{
   private readonly logger = new Logger('LocationsGateway');
   private activeUsers = new Map<string, Set<string>>();
 
@@ -38,12 +40,19 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
     return !!(userSockets && userSockets.size > 0);
   }
 
-  private async sendPushNotification(userIds: string[], title: string, message: string, data?: any) {
+  private async sendPushNotification(
+    userIds: string[],
+    title: string,
+    message: string,
+    data?: any,
+  ) {
     const appId = process.env.ONESIGNAL_APP_ID;
     const apiKey = process.env.ONESIGNAL_REST_API_KEY;
 
     if (!appId || !apiKey) {
-      this.logger.warn('OneSignal App ID veya REST API Key eksik. Push bildirim gönderilemedi.');
+      this.logger.warn(
+        'OneSignal App ID veya REST API Key eksik. Push bildirim gönderilemedi.',
+      );
       return;
     }
 
@@ -69,7 +78,7 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
       method: 'POST',
       headers: {
         'Content-Type': 'application/json; charset=utf-8',
-        'Authorization': `Basic ${apiKey}`,
+        Authorization: `Basic ${apiKey}`,
         'Content-Length': Buffer.byteLength(payloadStr),
       },
     };
@@ -81,13 +90,17 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
           responseBody += chunk;
         });
         res.on('end', () => {
-          this.logger.log(`LocationsGateway OneSignal Push Gönderim Sonucu: ${res.statusCode} | Gövde: ${responseBody}`);
+          this.logger.log(
+            `LocationsGateway OneSignal Push Gönderim Sonucu: ${res.statusCode} | Gövde: ${responseBody}`,
+          );
           resolve({ statusCode: res.statusCode, body: responseBody });
         });
       });
 
       req.on('error', (err) => {
-        this.logger.error(`LocationsGateway OneSignal Push Gönderimi Hata Aldı: ${err.message}`);
+        this.logger.error(
+          `LocationsGateway OneSignal Push Gönderimi Hata Aldı: ${err.message}`,
+        );
         resolve({ error: err.message });
       });
 
@@ -101,7 +114,9 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
     const apiKey = process.env.ONESIGNAL_REST_API_KEY;
 
     if (!appId || !apiKey) {
-      this.logger.warn('OneSignal App ID veya REST API Key eksik. Silent push bildirim gönderilemedi.');
+      this.logger.warn(
+        'OneSignal App ID veya REST API Key eksik. Silent push bildirim gönderilemedi.',
+      );
       return;
     }
 
@@ -126,7 +141,7 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
       method: 'POST',
       headers: {
         'Content-Type': 'application/json; charset=utf-8',
-        'Authorization': `Basic ${apiKey}`,
+        Authorization: `Basic ${apiKey}`,
         'Content-Length': Buffer.byteLength(payloadStr),
       },
     };
@@ -138,13 +153,17 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
           responseBody += chunk;
         });
         res.on('end', () => {
-          this.logger.log(`LocationsGateway Silent OneSignal Push Gönderim Sonucu: ${res.statusCode} | Gövde: ${responseBody}`);
+          this.logger.log(
+            `LocationsGateway Silent OneSignal Push Gönderim Sonucu: ${res.statusCode} | Gövde: ${responseBody}`,
+          );
           resolve({ statusCode: res.statusCode, body: responseBody });
         });
       });
 
       req.on('error', (err) => {
-        this.logger.error(`LocationsGateway Silent OneSignal Push Gönderimi Hata Aldı: ${err.message}`);
+        this.logger.error(
+          `LocationsGateway Silent OneSignal Push Gönderimi Hata Aldı: ${err.message}`,
+        );
         resolve({ error: err.message });
       });
 
@@ -155,7 +174,8 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   async handleConnection(client: Socket) {
     try {
-      const authHeader = client.handshake.auth?.token || client.handshake.headers?.authorization;
+      const authHeader =
+        client.handshake.auth?.token || client.handshake.headers?.authorization;
       let token = '';
 
       if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -168,7 +188,9 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
       }
 
       if (!token) {
-        this.logger.warn(`Soket bağlantısı reddedildi: Token bulunamadı. Cihaz: ${client.id}`);
+        this.logger.warn(
+          `Soket bağlantısı reddedildi: Token bulunamadı. Cihaz: ${client.id}`,
+        );
         client.disconnect(true);
         return;
       }
@@ -176,53 +198,117 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
       const payload = this.jwtService.verify(token);
       const userId = payload.sub;
 
-      if (!userId) {
-        this.logger.warn(`Soket bağlantısı reddedildi: Geçersiz token payloadı. Cihaz: ${client.id}`);
+      if (!userId || !payload.sid || payload.typ !== 'access') {
+        this.logger.warn(
+          `Soket bağlantısı reddedildi: Geçersiz token payloadı. Cihaz: ${client.id}`,
+        );
+        client.disconnect(true);
+        return;
+      }
+
+      const session = await this.prisma.session.findFirst({
+        where: {
+          id: payload.sid,
+          userId,
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        select: { id: true },
+      });
+      if (!session) {
+        this.logger.warn(
+          `Soket bağlantısı reddedildi: Oturum geçersiz. Cihaz: ${client.id}`,
+        );
         client.disconnect(true);
         return;
       }
 
       client.data.userId = userId;
+      client.data.sessionId = session.id;
+
+      // Oturum sonradan kapatılırsa bir sonraki socket mesajında bağlantıyı kes.
+      client.use(async (_packet, next) => {
+        const activeSession = await this.prisma.session.findFirst({
+          where: {
+            id: client.data.sessionId,
+            userId: client.data.userId,
+            revokedAt: null,
+            expiresAt: { gt: new Date() },
+          },
+          select: { id: true },
+        });
+        if (!activeSession) {
+          client.disconnect(true);
+          next(new Error('Oturum kapatılmış veya süresi dolmuş.'));
+          return;
+        }
+        next();
+      });
+
+      // Token süresi dolunca açık WebSocket bağlantısını da kapat.
+      if (payload.exp) {
+        const remainingMs = Math.max(0, payload.exp * 1000 - Date.now());
+        client.data.authExpiryTimer = setTimeout(
+          () => client.disconnect(true),
+          remainingMs,
+        );
+      }
       let userSockets = this.activeUsers.get(userId);
       if (!userSockets) {
         userSockets = new Set();
         this.activeUsers.set(userId, userSockets);
       }
       userSockets.add(client.id);
-      this.logger.log(`Kullanıcı (${userId}) soket bağlantısı kurdu: ${client.id}`);
-      
+      this.logger.log(
+        `Kullanıcı (${userId}) soket bağlantısı kurdu: ${client.id}`,
+      );
+
       // Veritabanındaki bağlantı durumunu çevrimiçi yap
       await this.updateUserConnectionStatus(userId, 'online');
     } catch (err) {
-      this.logger.error(`Soket bağlantısı doğrulanamadı: ${err.message}. Cihaz: ${client.id}`);
+      this.logger.error(
+        `Soket bağlantısı doğrulanamadı: ${err.message}. Cihaz: ${client.id}`,
+      );
       client.disconnect(true);
     }
   }
 
   async handleDisconnect(client: Socket) {
+    if (client.data.authExpiryTimer) {
+      clearTimeout(client.data.authExpiryTimer);
+    }
     const userId = client.data.userId;
     if (userId) {
       const userSockets = this.activeUsers.get(userId);
       if (userSockets) {
         userSockets.delete(client.id);
-        this.logger.log(`Kullanıcı (${userId}) bir soket bağlantısını kapattı: ${client.id}`);
+        this.logger.log(
+          `Kullanıcı (${userId}) bir soket bağlantısını kapattı: ${client.id}`,
+        );
         if (userSockets.size === 0) {
           this.activeUsers.delete(userId);
-          this.logger.log(`Kullanıcı (${userId}) tamamen ayrıldı. Veritabanı çevrimdışı yapılıyor...`);
-          
+          this.logger.log(
+            `Kullanıcı (${userId}) tamamen ayrıldı. Veritabanı çevrimdışı yapılıyor...`,
+          );
+
           // Veritabanındaki bağlantı durumunu çevrimdışı yap
           await this.updateUserConnectionStatus(userId, 'offline');
-          
+
           // Tüm aile gruplarına bu kullanıcının çevrimdışı olduğunu bildir
           await this.broadcastUserOffline(userId);
         }
       }
     } else {
-      this.logger.log(`Soket bağlantısı kesildi (anonim/yetkisiz): ${client.id}`);
+      this.logger.log(
+        `Soket bağlantısı kesildi (anonim/yetkisiz): ${client.id}`,
+      );
     }
   }
 
-  private async updateUserConnectionStatus(userId: string, status: 'online' | 'offline') {
+  private async updateUserConnectionStatus(
+    userId: string,
+    status: 'online' | 'offline',
+  ) {
     try {
       const lastLoc = await this.prisma.location.findFirst({
         where: { userId },
@@ -234,10 +320,15 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
           where: { id: lastLoc.id },
           data: { connectionStatus: status },
         });
-        this.logger.log(`Kullanıcının (${userId}) son konum bağlantı durumu güncellendi: ${status}`);
+        this.logger.log(
+          `Kullanıcının (${userId}) son konum bağlantı durumu güncellendi: ${status}`,
+        );
       }
     } catch (err) {
-      this.logger.error(`Bağlantı durumu güncellenirken hata oluştu (userId: ${userId}):`, err);
+      this.logger.error(
+        `Bağlantı durumu güncellenirken hata oluştu (userId: ${userId}):`,
+        err,
+      );
     }
   }
 
@@ -251,18 +342,28 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
       for (const membership of memberships) {
         const room = `family_${membership.familyId}`;
         this.server.to(room).emit('user_offline', { userId });
-        this.logger.log(`Odaya (${room}) kullanıcının çevrimdışı olduğu bildirildi: ${userId}`);
+        this.logger.log(
+          `Odaya (${room}) kullanıcının çevrimdışı olduğu bildirildi: ${userId}`,
+        );
       }
     } catch (err) {
-      this.logger.error(`Çevrimdışı yayını yapılırken hata oluştu (userId: ${userId}):`, err);
+      this.logger.error(
+        `Çevrimdışı yayını yapılırken hata oluştu (userId: ${userId}):`,
+        err,
+      );
     }
   }
 
   @SubscribeMessage('joinFamily')
-  async handleJoinFamily(@MessageBody() data: { familyId: string }, @ConnectedSocket() client: Socket) {
+  async handleJoinFamily(
+    @MessageBody() data: { familyId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
     const userId = client.data.userId;
     if (!userId) {
-      this.logger.warn(`Odaya katılım reddedildi: Kullanıcı kimliği doğrulanmamış.`);
+      this.logger.warn(
+        `Odaya katılım reddedildi: Kullanıcı kimliği doğrulanmamış.`,
+      );
       return { status: 'error', message: 'Yetkisiz erişim.' };
     }
 
@@ -277,8 +378,13 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
     });
 
     if (!isMember) {
-      this.logger.warn(`Kullanıcı (${userId}) üye olmadığı odaya katılmaya çalıştı: family_${data.familyId}`);
-      return { status: 'error', message: 'Bu aile odasına katılma yetkiniz yok.' };
+      this.logger.warn(
+        `Kullanıcı (${userId}) üye olmadığı odaya katılmaya çalıştı: family_${data.familyId}`,
+      );
+      return {
+        status: 'error',
+        message: 'Bu aile odasına katılma yetkiniz yok.',
+      };
     }
 
     const room = `family_${data.familyId}`;
@@ -288,7 +394,10 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   @SubscribeMessage('leaveFamily')
-  async handleLeaveFamily(@MessageBody() data: { familyId: string }, @ConnectedSocket() client: Socket) {
+  async handleLeaveFamily(
+    @MessageBody() data: { familyId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
     const userId = client.data.userId;
     if (!userId) {
       return { status: 'error', message: 'Yetkisiz erişim' };
@@ -296,7 +405,9 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     const room = `family_${data.familyId}`;
     client.leave(room);
-    this.logger.log(`İstemci (${client.id} - ${userId}), odadan ayrıldı: ${room}`);
+    this.logger.log(
+      `İstemci (${client.id} - ${userId}), odadan ayrıldı: ${room}`,
+    );
     return { status: 'success', room };
   }
 
@@ -305,21 +416,27 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
     @MessageBody() data: { targetUserId: string; lockState: boolean },
     @ConnectedSocket() client: Socket,
   ) {
-    return { status: 'error', message: 'Cihaz kilitleme özelliği devre dışı bırakılmıştır.' };
+    return {
+      status: 'error',
+      message: 'Cihaz kilitleme özelliği devre dışı bırakılmıştır.',
+    };
   }
 
   // Aile odasına konum güncellemesini yayınlar
   sendLocationUpdate(familyId: string, locationData: any) {
     const room = `family_${familyId}`;
     this.server.to(room).emit('location_update', locationData);
-    this.logger.log(`Odaya (${room}) yeni konum yayını yapıldı: ${JSON.stringify(locationData.userId)}`);
+    this.logger.log(
+      `Odaya (${room}) yeni konum yayını yapıldı: ${JSON.stringify(locationData.userId)}`,
+    );
   }
 
   // Aile odasındaki sadece velilere (guardian) alarm bildirimini gönderir
   async sendAlertNotification(familyId: string, alertData: any) {
     try {
-      const senderId = alertData.senderId || alertData.userId || alertData.data?.userId;
-      
+      const senderId =
+        alertData.senderId || alertData.userId || alertData.data?.userId;
+
       const guardians = await this.prisma.familyMember.findMany({
         where: {
           familyId,
@@ -332,15 +449,19 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
 
       let targetGuardians = guardians;
       if (senderId) {
-        targetGuardians = guardians.filter(g => g.userId !== senderId);
+        targetGuardians = guardians.filter((g) => g.userId !== senderId);
       }
 
       for (const guardian of targetGuardians) {
         this.sendEventToUser(guardian.userId, 'alert_notification', alertData);
       }
-      this.logger.log(`Aile Grubu (${familyId}) için velilere (${targetGuardians.length} kişi) alarm bildirimi iletildi: ${alertData.title}`);
+      this.logger.log(
+        `Aile Grubu (${familyId}) için velilere (${targetGuardians.length} kişi) alarm bildirimi iletildi: ${alertData.title}`,
+      );
     } catch (err) {
-      this.logger.error(`Alarm bildirimi velilere gönderilirken hata oluştu: ${err.message}`);
+      this.logger.error(
+        `Alarm bildirimi velilere gönderilirken hata oluştu: ${err.message}`,
+      );
     }
   }
 
@@ -351,10 +472,14 @@ export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnec
       for (const socketId of sockets) {
         this.server.to(socketId).emit(event, data);
       }
-      this.logger.log(`Kullanıcıya (${userId}) özel soket event'i gönderildi: ${event}`);
+      this.logger.log(
+        `Kullanıcıya (${userId}) özel soket event'i gönderildi: ${event}`,
+      );
       return true;
     }
-    this.logger.warn(`Kullanıcı (${userId}) çevrimiçi olmadığı için soket event'i gönderilemedi: ${event}`);
+    this.logger.warn(
+      `Kullanıcı (${userId}) çevrimiçi olmadığı için soket event'i gönderilemedi: ${event}`,
+    );
     return false;
   }
 }
