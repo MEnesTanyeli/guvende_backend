@@ -102,21 +102,6 @@ export class UsersService {
     return this.findOne(id);
   }
 
-  async purchasePremiumMock(id: string) {
-    const premiumExpiresAt = new Date();
-    premiumExpiresAt.setMonth(premiumExpiresAt.getMonth() + 1); // 1 aylık premium üyelik
-
-    await this.prisma.user.update({
-      where: { id },
-      data: {
-        isPremium: true,
-        premiumExpiresAt,
-      },
-    });
-
-    return this.findOne(id);
-  }
-
   async setProxy(userId: string, email: string) {
     const targetUser = await this.prisma.user.findUnique({
       where: { email: email.toLowerCase() },

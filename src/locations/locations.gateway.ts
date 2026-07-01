@@ -15,7 +15,10 @@ import * as https from 'https';
 
 @WebSocketGateway({
   cors: {
-    origin: '*',
+    origin: (process.env.CORS_ORIGINS || '')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean),
   },
 })
 export class LocationsGateway implements OnGatewayConnection, OnGatewayDisconnect {
