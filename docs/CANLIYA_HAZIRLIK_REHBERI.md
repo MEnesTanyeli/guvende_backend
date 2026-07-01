@@ -58,7 +58,9 @@ Eksileri yukarıdan aşağıya tek tek tamamlayacağız.
 
 ## - Eksik olanlar
 
-### 1. - Yedek aynı fiziksel diskte
+### 1. - Yedek aynı fiziksel diskte — canlı öncesine ertelendi
+
+Durum: Geliştirme aşamasında yerel günlük yedek kullanılacak. Gerçek kullanıcı verisi toplamadan önce off-site yedek kurulacak.
 
 Günlük yedek var fakat Ubuntu sunucusunun kendi diskinde.
 
@@ -74,7 +76,9 @@ Yapacağımız iş:
 - Otomatik silme/retention kuralı koymak.
 - Gerçek geri yükleme testi yapmak.
 
-### 2. - Uptime ve hata izleme sistemi yok
+### 2. - Uptime ve hata izleme sistemi yok — canlı öncesine ertelendi
+
+Durum: Geliştirme aşamasında elle kontrol edilecek. Uygulama gerçek kullanıcılara açılmadan önce uptime ve hata izleme kurulacak.
 
 Backend çökerse şu anda otomatik bildirim gelmiyor.
 
@@ -153,19 +157,22 @@ Elektrik, internet, modem, disk veya bilgisayar arızalanırsa bütün sistem du
 
 ## Yapacağımız sıra
 
-1. Off-site yedek
-2. Uptime ve hata izleme
-3. UFW ve SSH güvenliği
-4. Kritik otomatik testler
-5. Gerçek ödeme doğrulaması
-6. Gelişmiş token/session sistemi
+1. UFW ve SSH güvenliği
+2. Kritik otomatik testler
+3. Gerçek ödeme doğrulaması
+4. Gelişmiş token/session sistemi
+
+Canlı öncesine ertelenen zorunlu işler:
+
+- Off-site yedek
+- Uptime ve hata izleme
 
 ## Şu anki karar
 
 İlk kapatacağımız eksi:
 
 ```text
-1. Off-site yedek
+1. UFW ve SSH güvenliği
 ```
 
 Bu tamamlanınca satırı `-` listesinden çıkarıp `+ Hazır olanlar` listesine taşıyacağız.
