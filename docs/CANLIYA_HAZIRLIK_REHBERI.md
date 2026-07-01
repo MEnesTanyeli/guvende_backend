@@ -48,35 +48,17 @@ Eksileri yukarıdan aşağıya tek tek tamamlayacağız.
 + Günlük backup timer aktif edildi.
 + Güvenlik değişiklikleri GitHub'a gönderildi.
 + Güvensiz e-posta değiştirme endpoint'leri geçici olarak kaldırıldı.
++ JWT secret yenilendi ve eski oturum token'ları geçersiz kılındı.
++ OneSignal REST API key yenilendi, eski key silindi.
++ Yeni OneSignal key ile gerçek push bildirimi test edildi.
++ Sertleştirilmiş Docker image production ortamına deploy edildi.
++ Backend ve PostgreSQL container'ları deploy sonrasında sağlıklı çalıştı.
++ Public `/health` kontrolü `200` döndü.
++ Login, CORS, WebSocket ve push smoke kontrolleri yapıldı.
 
 ## - Eksik olanlar
 
-### 1. - Git'e girmiş eski gizli anahtarlar yenilenmedi
-
-Geçmişte `.env` dosyası Git'e commit edilmiş.
-
-Yapacağımız iş:
-
-- JWT secret'ı yenilemek.
-- OneSignal REST API key'i yenilemek.
-- Eski anahtarları iptal etmek.
-- Git geçmişini temizleyip temizlemeyeceğimize karar vermek.
-
-Not: JWT secret yenilenince mevcut kullanıcılar tekrar giriş yapmak zorunda kalır.
-
-### 2. - Sertleştirilmiş yeni sürüm henüz canlı container'da değil
-
-Güvenlik kodları hazır ve GitHub'da. Fakat çalışan Docker container henüz eski image'ı kullanıyor.
-
-Yapacağımız iş:
-
-- Deploy öncesi yeni yedek almak.
-- Yeni Docker image oluşturmak.
-- Backend container'ını güncellemek.
-- `/health` kontrolü yapmak.
-- Kayıt, giriş, e-posta ve konum smoke testleri yapmak.
-
-### 3. - Yedek aynı fiziksel diskte
+### 1. - Yedek aynı fiziksel diskte
 
 Günlük yedek var fakat Ubuntu sunucusunun kendi diskinde.
 
@@ -92,7 +74,7 @@ Yapacağımız iş:
 - Otomatik silme/retention kuralı koymak.
 - Gerçek geri yükleme testi yapmak.
 
-### 4. - Uptime ve hata izleme sistemi yok
+### 2. - Uptime ve hata izleme sistemi yok
 
 Backend çökerse şu anda otomatik bildirim gelmiyor.
 
@@ -104,7 +86,7 @@ Yapacağımız iş:
 - Disk doluluk alarmı eklemek.
 - Backup başarısızlık alarmı eklemek.
 
-### 5. - Otomatik test sayısı yetersiz
+### 3. - Otomatik test sayısı yetersiz
 
 Mevcut testler yalnızca temel örnek seviyesinde.
 
@@ -123,7 +105,7 @@ Eklememiz gereken testler:
 - Brevo hata senaryosu
 - Backup ve restore
 
-### 6. - UFW ve SSH güvenlik kontrolü tamamlanmadı
+### 4. - UFW ve SSH güvenlik kontrolü tamamlanmadı
 
 Kontrol edilmesi gerekenler:
 
@@ -134,7 +116,7 @@ Kontrol edilmesi gerekenler:
 - SSH yalnızca LAN/Tailscale üzerinden sınırlandırılabilir mi?
 - Ubuntu otomatik güvenlik güncellemeleri açık mı?
 
-### 7. - Gerçek ödeme doğrulaması yok
+### 5. - Gerçek ödeme doğrulaması yok
 
 Test amaçlı premium endpoint'i kaldırıldı fakat gerçek ödeme sistemi henüz yok.
 
@@ -145,7 +127,7 @@ Yapacağımız iş:
 - Sunucu tarafında receipt/token kontrolü.
 - İade ve abonelik iptali durumlarının yönetimi.
 
-### 8. - Token/session sistemi geliştirilmeli
+### 6. - Token/session sistemi geliştirilmeli
 
 Şu anda JWT ile giriş çalışıyor fakat gelişmiş session yönetimi yok.
 
@@ -157,7 +139,7 @@ Yapacağımız iş:
 - Çalınan token'ı iptal etme.
 - Admin hesapları için ek güvenlik/MFA.
 
-### 9. - Ev sunucusunda tek nokta arızası var
+### 7. - Ev sunucusunda tek nokta arızası var
 
 Elektrik, internet, modem, disk veya bilgisayar arızalanırsa bütün sistem durur.
 
@@ -171,22 +153,19 @@ Elektrik, internet, modem, disk veya bilgisayar arızalanırsa bütün sistem du
 
 ## Yapacağımız sıra
 
-1. Gizli anahtarların yenilenmesi
-2. Sertleştirilmiş sürümün canlı deploy'u
-3. Canlı smoke testleri
-4. Off-site yedek
-5. Uptime ve hata izleme
-6. UFW ve SSH güvenliği
-7. Kritik otomatik testler
-8. Gerçek ödeme doğrulaması
-9. Gelişmiş token/session sistemi
+1. Off-site yedek
+2. Uptime ve hata izleme
+3. UFW ve SSH güvenliği
+4. Kritik otomatik testler
+5. Gerçek ödeme doğrulaması
+6. Gelişmiş token/session sistemi
 
 ## Şu anki karar
 
 İlk kapatacağımız eksi:
 
 ```text
-1. Gizli anahtarların yenilenmesi
+1. Off-site yedek
 ```
 
 Bu tamamlanınca satırı `-` listesinden çıkarıp `+ Hazır olanlar` listesine taşıyacağız.
