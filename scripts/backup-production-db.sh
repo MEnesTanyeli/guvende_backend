@@ -22,7 +22,8 @@ docker compose --env-file .env.production -f docker-compose.prod.yml exec -T pos
   pg_dump --format=custom --no-owner --no-privileges \
   --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" > "$temporary"
 
-pg_restore --list "$temporary" >/dev/null
+docker compose --env-file .env.production -f docker-compose.prod.yml exec -T postgres \
+  pg_restore --list < "$temporary" >/dev/null
 mv "$temporary" "$target"
 trap - EXIT
 
