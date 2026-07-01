@@ -1,5 +1,6 @@
-import { ConflictException, Injectable, UnauthorizedException, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { ConflictException, Injectable, UnauthorizedException, BadRequestException, ForbiddenException, HttpException, HttpStatus } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { randomInt } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
@@ -18,31 +19,99 @@ export class AuthService {
 
   async sendVerificationCode(email: string) {
     const cleanedEmail = email.toLowerCase().trim();
-
-    // E-posta kullanımda mı kontrolü
     const existingUser = await this.prisma.user.findUnique({
       where: { email: cleanedEmail },
     });
-
     if (existingUser) {
       throw new ConflictException('Bu e-posta adresi zaten kullanımda.');
     }
 
-    // 6 haneli rastgele kod üret
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 dakika geçerli
-
-    // Kod tablosuna kaydet veya güncelle (UPSERT)
-    await this.prisma.emailVerification.upsert({
+    const now = new Date();
+    const verification = await this.prisma.emailVerification.findUnique({
       where: { email: cleanedEmail },
-      update: { code, expiresAt },
-      create: { email: cleanedEmail, code, expiresAt },
     });
 
-    // E-postayı gönder
+    if (verification?.blockedUntil && verification.blockedUntil > now) {
+      throw this.tooManyRequests(verification.blockedUntil);
+    }
+
+    if (verification && verification.expiresAt > now) {
+      return {
+        success: true,
+        codeSent: false,
+        message: 'Mevcut doğrulama kodunuz hâlâ geçerli.',
+        expiresAt: verification.expiresAt,
+        remainingSeconds: this.remainingSeconds(verification.expiresAt),
+      };
+    }
+
+    const hourlyWindowStart =
+      verification?.hourlyWindowStart &&
+      now.getTime() - verification.hourlyWindowStart.getTime() < OTP_HOUR_MS
+        ? verification.hourlyWindowStart
+        : now;
+    const dailyWindowStart =
+      verification?.dailyWindowStart &&
+      now.getTime() - verification.dailyWindowStart.getTime() < OTP_DAY_MS
+        ? verification.dailyWindowStart
+        : now;
+    const hourlySendCount =
+      hourlyWindowStart === verification?.hourlyWindowStart
+        ? verification.hourlySendCount + 1
+        : 1;
+    const dailySendCount =
+      dailyWindowStart === verification?.dailyWindowStart
+        ? verification.dailySendCount + 1
+        : 1;
+
+    if (hourlySendCount > MAX_HOURLY_SENDS || dailySendCount > MAX_DAILY_SENDS) {
+      const blockedUntil = new Date(now.getTime() + OTP_BLOCK_MS);
+      if (verification) {
+        await this.prisma.emailVerification.update({
+          where: { email: cleanedEmail },
+          data: { blockedUntil },
+        });
+      }
+      throw this.tooManyRequests(blockedUntil);
+    }
+
+    const code = randomInt(100000, 1000000).toString();
+    const codeHash = await bcrypt.hash(code, 10);
+    const expiresAt = new Date(now.getTime() + OTP_TTL_MS);
+    await this.prisma.emailVerification.upsert({
+      where: { email: cleanedEmail },
+      update: {
+        code: codeHash,
+        expiresAt,
+        failedAttempts: 0,
+        blockedUntil: null,
+        lastSentAt: now,
+        hourlyWindowStart,
+        hourlySendCount,
+        dailyWindowStart,
+        dailySendCount,
+      },
+      create: {
+        email: cleanedEmail,
+        code: codeHash,
+        expiresAt,
+        lastSentAt: now,
+        hourlyWindowStart: now,
+        hourlySendCount: 1,
+        dailyWindowStart: now,
+        dailySendCount: 1,
+      },
+    });
+
     await this.mailService.sendVerificationCodeEmail(cleanedEmail, code);
 
-    return { success: true, message: 'Doğrulama kodu e-posta adresinize gönderildi.' };
+    return {
+      success: true,
+      codeSent: true,
+      message: 'Doğrulama kodu e-posta adresinize gönderildi.',
+      expiresAt,
+      remainingSeconds: this.remainingSeconds(expiresAt),
+    };
   }
 
   async register(dto: RegisterDto) {
@@ -61,12 +130,33 @@ export class AuthService {
       where: { email: cleanedEmail },
     });
 
-    if (!verification || verification.code !== dto.code) {
-      throw new BadRequestException('Girdiğiniz doğrulama kodu hatalıdır.');
+    const now = new Date();
+    if (verification?.blockedUntil && verification.blockedUntil > now) {
+      throw this.tooManyRequests(verification.blockedUntil);
     }
 
-    if (verification.expiresAt < new Date()) {
+    if (!verification || verification.expiresAt < now) {
       throw new BadRequestException('Doğrulama kodunun süresi dolmuş. Lütfen yeni bir kod isteyin.');
+    }
+
+    const codeIsValid = await bcrypt.compare(dto.code, verification.code);
+    if (!codeIsValid) {
+      const failedAttempts = verification.failedAttempts + 1;
+      const blockedUntil =
+        failedAttempts >= MAX_FAILED_ATTEMPTS
+          ? new Date(now.getTime() + OTP_BLOCK_MS)
+          : null;
+      await this.prisma.emailVerification.update({
+        where: { email: cleanedEmail },
+        data: { failedAttempts, blockedUntil },
+      });
+      if (blockedUntil) {
+        throw this.tooManyRequests(blockedUntil);
+      }
+      throw new BadRequestException({
+        message: 'Girdiğiniz doğrulama kodu hatalıdır.',
+        remainingAttempts: MAX_FAILED_ATTEMPTS - failedAttempts,
+      });
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
@@ -181,53 +271,125 @@ export class AuthService {
   }
 
   async forgotPassword(email: string) {
+    const cleanedEmail = email.toLowerCase().trim();
     const user = await this.prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
+      where: { email: cleanedEmail },
     });
 
     if (!user) {
-      throw new NotFoundException('Bu e-posta adresine kayıtlı kullanıcı bulunamadı.');
+      return { message: 'E-posta kayıtlıysa şifre sıfırlama kodu gönderildi.' };
     }
 
-    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const resetExpires = new Date();
-    resetExpires.setMinutes(resetExpires.getMinutes() + 10); // 10 dakika geçerli
+    const now = new Date();
+    if (user.resetOtpBlockedUntil && user.resetOtpBlockedUntil > now) {
+      throw this.tooManyRequests(user.resetOtpBlockedUntil);
+    }
+
+    if (user.resetOtpExpiresAt && user.resetOtpExpiresAt > now) {
+      return {
+        message: 'Mevcut şifre sıfırlama kodunuz hâlâ geçerli.',
+        codeSent: false,
+        expiresAt: user.resetOtpExpiresAt,
+        remainingSeconds: this.remainingSeconds(user.resetOtpExpiresAt),
+      };
+    }
+
+    const hourlyWindowStart =
+      user.resetOtpHourlyWindowStart &&
+      now.getTime() - user.resetOtpHourlyWindowStart.getTime() < OTP_HOUR_MS
+        ? user.resetOtpHourlyWindowStart
+        : now;
+    const dailyWindowStart =
+      user.resetOtpDailyWindowStart &&
+      now.getTime() - user.resetOtpDailyWindowStart.getTime() < OTP_DAY_MS
+        ? user.resetOtpDailyWindowStart
+        : now;
+    const hourlySendCount =
+      hourlyWindowStart === user.resetOtpHourlyWindowStart
+        ? user.resetOtpHourlySendCount + 1
+        : 1;
+    const dailySendCount =
+      dailyWindowStart === user.resetOtpDailyWindowStart
+        ? user.resetOtpDailySendCount + 1
+        : 1;
+
+    if (hourlySendCount > MAX_HOURLY_SENDS || dailySendCount > MAX_DAILY_SENDS) {
+      const blockedUntil = new Date(now.getTime() + OTP_BLOCK_MS);
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { resetOtpBlockedUntil: blockedUntil },
+      });
+      throw this.tooManyRequests(blockedUntil);
+    }
+
+    const resetCode = randomInt(100000, 1000000).toString();
+    const codeHash = await bcrypt.hash(resetCode, 10);
+    const resetExpires = new Date(now.getTime() + OTP_TTL_MS);
 
     await this.prisma.user.update({
       where: { id: user.id },
       data: {
-        resetOtpCode: resetCode,
+        resetOtpCode: codeHash,
         resetOtpExpiresAt: resetExpires,
+        resetOtpFailedAttempts: 0,
+        resetOtpBlockedUntil: null,
+        resetOtpLastSentAt: now,
+        resetOtpHourlyWindowStart: hourlyWindowStart,
+        resetOtpHourlySendCount: hourlySendCount,
+        resetOtpDailyWindowStart: dailyWindowStart,
+        resetOtpDailySendCount: dailySendCount,
       },
     });
 
-    try {
-      await this.mailService.sendResetPasswordEmail(user.email, resetCode);
-    } catch (error) {
-      console.error('Sifre sifirlama e-postasi gonderilemedi:', error);
-      throw new BadRequestException('Şifre sıfırlama e-postası gönderilirken hata oluştu.');
-    }
+    await this.mailService.sendResetPasswordEmail(user.email, resetCode);
 
     return {
       message: 'Şifre sıfırlama kodu e-posta adresinize gönderildi.',
+      codeSent: true,
+      expiresAt: resetExpires,
+      remainingSeconds: this.remainingSeconds(resetExpires),
     };
   }
 
   async resetPassword(dto: any) {
     const user = await this.prisma.user.findUnique({
-      where: { email: dto.email.toLowerCase() },
+      where: { email: dto.email.toLowerCase().trim() },
     });
 
     if (!user) {
-      throw new NotFoundException('Kullanıcı bulunamadı.');
+      throw new BadRequestException('Geçersiz veya süresi dolmuş sıfırlama kodu.');
     }
 
-    if (!user.resetOtpCode || user.resetOtpCode !== dto.code) {
-      throw new BadRequestException('Geçersiz sıfırlama kodu.');
+    const now = new Date();
+    if (user.resetOtpBlockedUntil && user.resetOtpBlockedUntil > now) {
+      throw this.tooManyRequests(user.resetOtpBlockedUntil);
     }
 
-    if (!user.resetOtpExpiresAt || user.resetOtpExpiresAt < new Date()) {
+    if (!user.resetOtpCode || !user.resetOtpExpiresAt || user.resetOtpExpiresAt < now) {
       throw new BadRequestException('Sıfırlama kodunun süresi dolmuş.');
+    }
+
+    const codeIsValid = await bcrypt.compare(dto.code, user.resetOtpCode);
+    if (!codeIsValid) {
+      const failedAttempts = user.resetOtpFailedAttempts + 1;
+      const blockedUntil =
+        failedAttempts >= MAX_FAILED_ATTEMPTS
+          ? new Date(now.getTime() + OTP_BLOCK_MS)
+          : null;
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          resetOtpFailedAttempts: failedAttempts,
+          resetOtpBlockedUntil: blockedUntil,
+        },
+      });
+      if (blockedUntil) {
+        throw this.tooManyRequests(blockedUntil);
+      }
+      throw new BadRequestException({
+        message: 'Geçersiz sıfırlama kodu.',
+        remainingAttempts: MAX_FAILED_ATTEMPTS - failedAttempts,
+      });
     }
 
     const passwordHash = await bcrypt.hash(dto.newPassword, 10);
@@ -238,6 +400,8 @@ export class AuthService {
         passwordHash,
         resetOtpCode: null,
         resetOtpExpiresAt: null,
+        resetOtpFailedAttempts: 0,
+        resetOtpBlockedUntil: null,
       },
     });
 
@@ -245,4 +409,27 @@ export class AuthService {
       message: 'Şifreniz başarıyla sıfırlandı. Yeni şifrenizle giriş yapabilirsiniz.',
     };
   }
+
+  private remainingSeconds(expiresAt: Date): number {
+    return Math.max(0, Math.ceil((expiresAt.getTime() - Date.now()) / 1000));
+  }
+
+  private tooManyRequests(blockedUntil: Date): HttpException {
+    return new HttpException(
+      {
+        statusCode: HttpStatus.TOO_MANY_REQUESTS,
+        message: 'Çok fazla deneme yapıldı. Lütfen engel süresi dolunca tekrar deneyin.',
+        blockedUntil,
+        remainingSeconds: this.remainingSeconds(blockedUntil),
+      },
+      HttpStatus.TOO_MANY_REQUESTS,
+    );
+  }
 }
+const OTP_TTL_MS = 3 * 60 * 1000;
+const OTP_BLOCK_MS = 15 * 60 * 1000;
+const OTP_HOUR_MS = 60 * 60 * 1000;
+const OTP_DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_HOURLY_SENDS = 5;
+const MAX_DAILY_SENDS = 15;
+const MAX_FAILED_ATTEMPTS = 5;

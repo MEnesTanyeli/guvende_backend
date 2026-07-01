@@ -58,6 +58,13 @@ model User {
   appUsages           AppUsage[]
   resetOtpCode             String?
   resetOtpExpiresAt        DateTime?
+  resetOtpFailedAttempts   Int                @default(0)
+  resetOtpBlockedUntil     DateTime?
+  resetOtpLastSentAt       DateTime?
+  resetOtpHourlySendCount  Int                @default(0)
+  resetOtpHourlyWindowStart DateTime?
+  resetOtpDailySendCount   Int                @default(0)
+  resetOtpDailyWindowStart DateTime?
   emailChangeOtpCode       String?
   emailChangeNewEmail      String?
   emailChangeOtpExpiresAt  DateTime?
@@ -213,6 +220,14 @@ model EmailVerification {
   code      String
   expiresAt DateTime
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  failedAttempts Int @default(0)
+  blockedUntil DateTime?
+  lastSentAt DateTime @default(now())
+  hourlySendCount Int @default(1)
+  hourlyWindowStart DateTime @default(now())
+  dailySendCount Int @default(1)
+  dailyWindowStart DateTime @default(now())
 
   @@map("email_verifications")
 }
