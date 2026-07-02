@@ -74,6 +74,7 @@ Uygulama teknik olarak kullanılabilir durumda. Gerçek kullanıcılara açılma
 + Session migration'ı production veritabanına başarıyla uygulandı.
 + Session deploy'undan hemen önce doğrulanmış PostgreSQL yedeği alındı: `guvende-20260702T051058Z.dump`.
 + Session sistemi GitHub `main` dalına gönderildi.
++ Tailscale üzerinden ev dışından SSH bağlantısı işyeri bilgisayarından başarıyla doğrulandı.
 
 ## - Eksik olanlar
 
@@ -126,18 +127,7 @@ Token/session sistemi migration ile production ortamına alındı. Kalan iş, ad
 
 Frontend sözleşmesi: [FRONTEND_OTURUM_ENTEGRASYONU.md](./FRONTEND_OTURUM_ENTEGRASYONU.md)
 
-### 5. - Tailscale üzerinden SSH bağlantısı uçtan uca doğrulanmadı
-
-Tailscale servisi Ubuntu'da aktif ve UFW içinde Tailscale ağına SSH izni verildi. LAN üzerinden yeni SSH bağlantısı başarıyla doğrulandı. Ancak Windows Tailscale istemcisi bağlı değilken yapılan doğrudan Tailscale SSH testi zaman aşımına uğradı.
-
-Yapacağımız iş:
-
-- Windows ve Ubuntu Tailscale istemcileri bağlıyken `100.67.25.125` adresine SSH testi yapmak.
-- Test başarılıysa uzaktan yönetim yolunu Tailscale olarak belgelemek.
-
-Bu durum LAN erişimini veya çalışan backend'i etkilemiyor.
-
-### 6. - Ev sunucusunda tek nokta arızası var
+### 5. - Ev sunucusunda tek nokta arızası var
 
 Elektrik, internet, modem, disk veya bilgisayar arızalanırsa bütün sistem durur.
 
@@ -155,7 +145,6 @@ Elektrik, internet, modem, disk veya bilgisayar arızalanırsa bütün sistem du
 2. Uptime ve hata izleme
 3. Gerçek ödeme doğrulaması
 4. Admin hesapları için MFA
-5. Tailscale SSH uçtan uca testi
 
 Canlı öncesine ertelenen zorunlu işler:
 
