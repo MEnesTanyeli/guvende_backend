@@ -7,6 +7,12 @@ Bu dosyada:
 
 Eksileri yukarıdan aşağıya tek tek tamamlayacağız.
 
+## Şu anki genel durum
+
+Backend production ortamında çalışıyor ve `https://api.guvende.app/health` adresi `200` dönüyor. Domain, HTTPS, Cloudflare Tunnel, Docker, PostgreSQL, e-posta, push bildirim, güvenli session sistemi, sunucu güvenlik duvarı ve yerel günlük yedek hazır.
+
+Uygulama teknik olarak kullanılabilir durumda. Gerçek kullanıcılara açılmadan önce en önemli kalan işler off-site yedek ile uptime/hata izleme; ücretli özellik açılmadan önce ödeme doğrulaması; admin paneli açılmadan önce admin MFA'dır.
+
 ## + Hazır olanlar
 
 + Domain alındı: `guvende.app`
@@ -55,7 +61,7 @@ Eksileri yukarıdan aşağıya tek tek tamamlayacağız.
 + Backend ve PostgreSQL container'ları deploy sonrasında sağlıklı çalıştı.
 + Public `/health` kontrolü `200` döndü.
 + Login, CORS, WebSocket ve push smoke kontrolleri yapıldı.
-+ Kritik akışlar için 27 otomatik test yazıldı ve tamamı geçti.
++ Kritik akışlar için 37 otomatik test yazıldı ve tamamı geçti.
 + Son PostgreSQL yedeği geçici veritabanına başarıyla geri yüklendi.
 + UFW aktif edildi; varsayılan gelen bağlantı politikası engelleme olarak ayarlandı.
 + SSH yalnızca LAN (`192.168.1.0/24`) ve Tailscale (`100.64.0.0/10`) ağlarından erişime açıldı.
@@ -65,6 +71,9 @@ Eksileri yukarıdan aşağıya tek tek tamamlayacağız.
 + Cihaz bazlı access/refresh token session sistemi production ortamına alındı.
 + Refresh token rotasyonu, 3 saniyelik yarış toleransı ve cihaz bazlı iptal aktif.
 + Tek cihazdan/tüm cihazlardan çıkış ile HTTP/WebSocket session doğrulaması aktif.
++ Session migration'ı production veritabanına başarıyla uygulandı.
++ Session deploy'undan hemen önce doğrulanmış PostgreSQL yedeği alındı: `guvende-20260702T051058Z.dump`.
++ Session sistemi GitHub `main` dalına gönderildi.
 
 ## - Eksik olanlar
 
@@ -84,7 +93,7 @@ Yapacağımız iş:
 - Cloudflare R2 veya Backblaze B2 hesabı açmak.
 - Yedekleri şifreli şekilde dış depoya göndermek.
 - Otomatik silme/retention kuralı koymak.
-- Gerçek geri yükleme testi yapmak.
+- Off-site kopyadan gerçek geri yükleme testi yapmak.
 
 ### 2. - Uptime ve hata izleme sistemi yok — canlı öncesine ertelendi
 
@@ -117,7 +126,18 @@ Token/session sistemi migration ile production ortamına alındı. Kalan iş, ad
 
 Frontend sözleşmesi: [FRONTEND_OTURUM_ENTEGRASYONU.md](./FRONTEND_OTURUM_ENTEGRASYONU.md)
 
-### 5. - Ev sunucusunda tek nokta arızası var
+### 5. - Tailscale üzerinden SSH bağlantısı uçtan uca doğrulanmadı
+
+Tailscale servisi Ubuntu'da aktif ve UFW içinde Tailscale ağına SSH izni verildi. LAN üzerinden yeni SSH bağlantısı başarıyla doğrulandı. Ancak Windows Tailscale istemcisi bağlı değilken yapılan doğrudan Tailscale SSH testi zaman aşımına uğradı.
+
+Yapacağımız iş:
+
+- Windows ve Ubuntu Tailscale istemcileri bağlıyken `100.67.25.125` adresine SSH testi yapmak.
+- Test başarılıysa uzaktan yönetim yolunu Tailscale olarak belgelemek.
+
+Bu durum LAN erişimini veya çalışan backend'i etkilemiyor.
+
+### 6. - Ev sunucusunda tek nokta arızası var
 
 Elektrik, internet, modem, disk veya bilgisayar arızalanırsa bütün sistem durur.
 
@@ -131,8 +151,11 @@ Elektrik, internet, modem, disk veya bilgisayar arızalanırsa bütün sistem du
 
 ## Yapacağımız sıra
 
-1. Gerçek ödeme doğrulaması
-2. Admin hesapları için MFA
+1. Gerçek kullanıcı öncesi off-site yedek
+2. Uptime ve hata izleme
+3. Gerçek ödeme doğrulaması
+4. Admin hesapları için MFA
+5. Tailscale SSH uçtan uca testi
 
 Canlı öncesine ertelenen zorunlu işler:
 
@@ -144,10 +167,10 @@ Canlı öncesine ertelenen zorunlu işler:
 Sıradaki kapatacağımız eksi:
 
 ```text
-1. Gerçek ödeme doğrulaması
+1. Off-site PostgreSQL yedeği
 ```
 
-UFW/SSH güvenliği ve kritik otomatik testler tamamlandı; commit ve push işlemi diğer yerel değişikliklerle birlikte daha sonra toplu yapılacak.
+UFW/SSH sertleştirmesi, kritik otomatik testler, cihaz bazlı session sistemi, production migration, deploy ve GitHub push tamamlandı.
 
 Teknik ayrıntılar için:
 
