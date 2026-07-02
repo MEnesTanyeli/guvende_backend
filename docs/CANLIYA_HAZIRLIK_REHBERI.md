@@ -62,6 +62,9 @@ Eksileri yukarıdan aşağıya tek tek tamamlayacağız.
 + SSH parola ve klavye-etkileşimli girişi kapatıldı; yalnızca anahtar girişi açık.
 + SSH üzerinden doğrudan root girişi kapatıldı.
 + Ubuntu otomatik güvenlik güncellemeleri aktif ve sistem açılışında etkin.
++ Cihaz bazlı access/refresh token session sistemi production ortamına alındı.
++ Refresh token rotasyonu, 3 saniyelik yarış toleransı ve cihaz bazlı iptal aktif.
++ Tek cihazdan/tüm cihazlardan çıkış ile HTTP/WebSocket session doğrulaması aktif.
 
 ## - Eksik olanlar
 
@@ -108,26 +111,9 @@ Yapacağımız iş:
 - Sunucu tarafında receipt/token kontrolü.
 - İade ve abonelik iptali durumlarının yönetimi.
 
-### 4. - Token/session sistemi geliştirilmeli
+### 4. - Admin hesapları için MFA eksik
 
-Durum: Backend kodu yerelde hazırlandı ve test edildi; henüz commit/deploy edilmedi. Frontend entegrasyonu tamamlandıktan sonra production'a alınacak.
-
-Hazırlananlar:
-
-- 15 dakikalık access token.
-- 30 günlük ve her kullanımda değişen refresh token.
-- Tek cihazdan ve tüm cihazlardan çıkış.
-- Çalınan/eski refresh token tekrar kullanımında ilgili cihazın session ailesini iptal etme.
-- Her cihaz için ayrı token ailesi ve cihaz bazlı iptal.
-- Eşzamanlı yenilemeler için 3 saniyelik güvenli tolerans ve `409 REFRESH_ALREADY_ROTATED` sözleşmesi.
-- HTTP ve WebSocket session doğrulaması.
-- Şifre değişince tüm session'ları kapatma.
-- Frontend ve Android Java token yenileme entegrasyonu.
-
-Kalanlar:
-
-- Production migration ve deploy.
-- Admin hesapları için MFA (admin paneli canlıya açılmadan önce).
+Token/session sistemi migration ile production ortamına alındı. Kalan iş, admin paneli gerçek kullanıma açılmadan önce yönetici hesaplarına MFA eklemek.
 
 Frontend sözleşmesi: [FRONTEND_OTURUM_ENTEGRASYONU.md](./FRONTEND_OTURUM_ENTEGRASYONU.md)
 
@@ -146,7 +132,7 @@ Elektrik, internet, modem, disk veya bilgisayar arızalanırsa bütün sistem du
 ## Yapacağımız sıra
 
 1. Gerçek ödeme doğrulaması
-2. Gelişmiş token/session sistemi
+2. Admin hesapları için MFA
 
 Canlı öncesine ertelenen zorunlu işler:
 
