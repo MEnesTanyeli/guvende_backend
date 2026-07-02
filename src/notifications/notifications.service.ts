@@ -132,7 +132,10 @@ export class NotificationsService {
       message,
       senderId,
       senderRole: sender?.memberType,
-      data,
+      data: {
+        ...data,
+        familyId,
+      },
       createdAt: new Date(),
     });
 
