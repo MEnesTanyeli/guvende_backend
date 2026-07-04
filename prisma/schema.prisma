@@ -70,6 +70,7 @@ model User {
   emailChangeOtpExpiresAt   DateTime?
   devicePermissions         Json?
   sessions                  Session[]
+  adminAuditLogs            AdminAuditLog[]
 
   @@map("users")
 }
@@ -250,4 +251,17 @@ model EmailVerification {
   dailyWindowStart  DateTime  @default(now())
 
   @@map("email_verifications")
+}
+
+model AdminAuditLog {
+  id        String   @id @default(uuid())
+  adminId   String
+  action    String   // "USER_DELETE", "ROLE_CHANGE", "FAMILY_DELETE", "ALERT_RESOLVE", "DEVICE_RESET", "PREMIUM_TOGGLE"
+  targetId  String
+  details   Json
+  createdAt DateTime @default(now())
+
+  admin     User     @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@map("admin_audit_logs")
 }

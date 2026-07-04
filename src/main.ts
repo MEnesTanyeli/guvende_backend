@@ -2,6 +2,8 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { Logger, ValidationPipe } from '@nestjs/common';
 
+import { AppLogger, errorLogger } from './common/logger';
+
 function assertProductionEnvironment(): void {
   const required = ['DATABASE_URL', 'JWT_SECRET', 'BREVO_API_KEY'];
   const missing = required.filter((key) => !process.env[key]);
@@ -16,7 +18,9 @@ function assertProductionEnvironment(): void {
 
 async function bootstrap() {
   assertProductionEnvironment();
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    logger: new AppLogger(),
+  });
   const logger = new Logger('Bootstrap');
   const httpAdapter = app.getHttpAdapter().getInstance();
 
@@ -66,7 +70,9 @@ async function bootstrap() {
   logger.log(`Backend sunucusu baslatildi. Port: ${port}`);
 }
 bootstrap().catch((error) => {
-  Logger.error('Backend baslatilamadi', error instanceof Error ? error.stack : String(error));
+  const msg = error instanceof Error ? error.stack : String(error);
+  Logger.error('Backend baslatilamadi', msg);
+  errorLogger.error(`Backend baslatilamadi: ${msg}`);
   process.exit(1);
 });
 

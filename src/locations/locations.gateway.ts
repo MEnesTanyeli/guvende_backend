@@ -393,6 +393,29 @@ export class LocationsGateway
     return { status: 'success', room };
   }
 
+  @SubscribeMessage('joinAdminControlRoom')
+  async handleJoinAdminControlRoom(
+    @ConnectedSocket() client: Socket,
+  ) {
+    const userId = client.data.userId;
+    if (!userId) {
+      return { status: 'error', message: 'Yetkisiz erişim.' };
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true }
+    });
+
+    if (!user || user.role !== 'admin') {
+      return { status: 'error', message: 'Sadece yöneticiler katılabilir.' };
+    }
+
+    client.join('admin_control_room');
+    this.logger.log(`İstemci (${client.id}), admin_control_room odasına katıldı.`);
+    return { status: 'success' };
+  }
+
   @SubscribeMessage('leaveFamily')
   async handleLeaveFamily(
     @MessageBody() data: { familyId: string },
@@ -426,8 +449,9 @@ export class LocationsGateway
   sendLocationUpdate(familyId: string, locationData: any) {
     const room = `family_${familyId}`;
     this.server.to(room).emit('location_update', locationData);
+    this.server.to('admin_control_room').emit('location_update', locationData);
     this.logger.log(
-      `Odaya (${room}) yeni konum yayını yapıldı: ${JSON.stringify(locationData.userId)}`,
+      `Odaya (${room}) ve admin_control_room odasına yeni konum yayını yapıldı: ${JSON.stringify(locationData.userId)}`,
     );
   }
 
@@ -455,8 +479,9 @@ export class LocationsGateway
       for (const guardian of targetGuardians) {
         this.sendEventToUser(guardian.userId, 'alert_notification', alertData);
       }
+      this.server.to('admin_control_room').emit('alert_notification', alertData);
       this.logger.log(
-        `Aile Grubu (${familyId}) için velilere (${targetGuardians.length} kişi) alarm bildirimi iletildi: ${alertData.title}`,
+        `Aile Grubu (${familyId}) için velilere (${targetGuardians.length} kişi) ve admin_control_room odasına alarm bildirimi iletildi: ${alertData.title}`,
       );
     } catch (err) {
       this.logger.error(

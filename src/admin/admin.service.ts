@@ -1,12 +1,16 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AlertStatus, AlertType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AdminQueryDto, AlertQueryDto, UserQueryDto } from './dto/admin-query.dto';
 import { UpdateAdminUserDto } from './dto/update-user.dto';
 
 @Injectable()
 export class AdminService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   async dashboard() {
     const now = new Date();
@@ -83,12 +87,125 @@ export class AdminService {
     return this.paginated(items, total, query.page, query.limit);
   }
 
+  async user(id: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        role: true,
+        isPremium: true,
+        premiumExpiresAt: true,
+        trialEndsAt: true,
+        deviceId: true,
+        loginAllowed: true,
+        devicePermissions: true,
+        createdAt: true,
+        memberships: {
+          include: {
+            family: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
+        alerts: {
+          take: 10,
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+
+    if (!user) throw new NotFoundException('Kullanıcı bulunamadı.');
+
+    const latestLocation = await this.prisma.location.findFirst({
+      where: { userId: id },
+      orderBy: { recordedAt: 'desc' },
+      select: {
+        batteryLevel: true,
+        isCharging: true,
+        connectionStatus: true,
+        recordedAt: true,
+      },
+    });
+
+    return {
+      ...user,
+      latestLocation,
+    };
+  }
+
+  async userHistory(adminId: string, userId: string, dateStr?: string) {
+    const date = dateStr ? new Date(dateStr) : new Date();
+    const startOfDay = new Date(date.setHours(0, 0, 0, 0));
+    const endOfDay = new Date(date.setHours(23, 59, 59, 999));
+
+    const history = await this.prisma.location.findMany({
+      where: {
+        userId,
+        recordedAt: {
+          gte: startOfDay,
+          lte: endOfDay,
+        },
+      },
+      orderBy: {
+        recordedAt: 'asc',
+      },
+      select: {
+        id: true,
+        latitude: true,
+        longitude: true,
+        recordedAt: true,
+        batteryLevel: true,
+        speed: true,
+      },
+    });
+
+    await this.logAction(adminId, 'LOCATION_HISTORY_VIEW', userId, { date: dateStr || new Date().toISOString().split('T')[0] });
+
+    return history;
+  }
+
+  async latestLocations() {
+    const childAndElderUsers = await this.prisma.user.findMany({
+      where: {
+        role: { in: ['child', 'elder'] }
+      },
+      select: { id: true, name: true, email: true, role: true }
+    });
+
+    const userIds = childAndElderUsers.map(u => u.id);
+
+    const locations = await Promise.all(
+      userIds.map(async (uid) => {
+        const loc = await this.prisma.location.findFirst({
+          where: { userId: uid },
+          orderBy: { recordedAt: 'desc' },
+          include: {
+            user: {
+              select: { id: true, name: true, email: true, role: true }
+            }
+          }
+        });
+        return loc;
+      })
+    );
+
+    return locations.filter(Boolean);
+  }
+
   async updateUser(adminId: string, userId: string, dto: UpdateAdminUserDto) {
     if (adminId === userId && dto.role && dto.role !== 'admin') {
       throw new BadRequestException('Kendi yönetici yetkinizi kaldıramazsınız.');
     }
-    await this.ensureUser(userId);
-    return this.prisma.user.update({
+    const userBefore = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: true, isPremium: true } });
+    if (!userBefore) throw new NotFoundException('Kullanıcı bulunamadı.');
+
+    const user = await this.prisma.user.update({
       where: { id: userId },
       data: {
         ...(dto.role !== undefined && { role: dto.role }),
@@ -100,13 +217,34 @@ export class AdminService {
         premiumExpiresAt: true, trialEndsAt: true,
       },
     });
+
+    if (dto.role !== undefined && dto.role !== userBefore.role) {
+      await this.logAction(adminId, 'ROLE_CHANGE', userId, { from: userBefore.role, to: dto.role });
+    }
+    if (dto.isPremium !== undefined && dto.isPremium !== userBefore.isPremium) {
+      await this.logAction(adminId, 'PREMIUM_TOGGLE', userId, { from: userBefore.isPremium, to: dto.isPremium });
+    }
+
+    return user;
   }
 
   async deleteUser(adminId: string, userId: string) {
     if (adminId === userId) throw new BadRequestException('Kendi yönetici hesabınızı silemezsiniz.');
-    await this.ensureUser(userId);
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true, email: true } });
+    if (!user) throw new NotFoundException('Kullanıcı bulunamadı.');
     await this.prisma.user.delete({ where: { id: userId } });
+    await this.logAction(adminId, 'USER_DELETE', userId, { name: user.name, email: user.email });
     return { success: true };
+  }
+
+  async resetDevice(adminId: string, userId: string) {
+    await this.ensureUser(userId);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { deviceId: null },
+    });
+    await this.logAction(adminId, 'DEVICE_RESET', userId, {});
+    return { success: true, message: 'Cihaz kilidi sıfırlandı.' };
   }
 
   async families(query: AdminQueryDto) {
@@ -147,10 +285,11 @@ export class AdminService {
     return family;
   }
 
-  async deleteFamily(id: string) {
-    const family = await this.prisma.family.findUnique({ where: { id }, select: { id: true } });
+  async deleteFamily(adminId: string, id: string) {
+    const family = await this.prisma.family.findUnique({ where: { id }, select: { id: true, name: true } });
     if (!family) throw new NotFoundException('Aile grubu bulunamadı.');
     await this.prisma.family.delete({ where: { id } });
+    await this.logAction(adminId, 'FAMILY_DELETE', id, { name: family.name });
     return { success: true };
   }
 
@@ -182,18 +321,137 @@ export class AdminService {
     return this.paginated(items, total, query.page, query.limit);
   }
 
-  async resolveAlert(id: string) {
-    const alert = await this.prisma.alert.findUnique({ where: { id }, select: { id: true } });
+  async resolveAlert(adminId: string, id: string) {
+    const alert = await this.prisma.alert.findUnique({ where: { id }, select: { id: true, type: true } });
     if (!alert) throw new NotFoundException('Alarm bulunamadı.');
-    return this.prisma.alert.update({
+    const res = await this.prisma.alert.update({
       where: { id },
       data: { status: AlertStatus.resolved, resolvedAt: new Date() },
     });
+    await this.logAction(adminId, 'ALERT_RESOLVE', id, { type: alert.type });
+    return res;
   }
 
   private async ensureUser(id: string) {
     const user = await this.prisma.user.findUnique({ where: { id }, select: { id: true } });
     if (!user) throw new NotFoundException('Kullanıcı bulunamadı.');
+  }
+
+  async logAction(adminId: string, action: string, targetId: string, details: any) {
+    try {
+      await this.prisma.adminAuditLog.create({
+        data: {
+          adminId,
+          action,
+          targetId,
+          details: details || {},
+        },
+      });
+    } catch (e) {
+      console.error('Failed to save audit log:', e);
+    }
+  }
+
+  async auditLogs(query: AdminQueryDto) {
+    const where: Prisma.AdminAuditLogWhereInput = {};
+    if (query.search) {
+      where.OR = [
+        { action: { contains: query.search, mode: 'insensitive' } },
+        { admin: { name: { contains: query.search, mode: 'insensitive' } } },
+        { admin: { email: { contains: query.search, mode: 'insensitive' } } },
+      ];
+    }
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.adminAuditLog.findMany({
+        where,
+        skip: (query.page - 1) * query.limit,
+        take: query.limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          admin: { select: { id: true, name: true, email: true } },
+        },
+      }),
+      this.prisma.adminAuditLog.count({ where }),
+    ]);
+    return this.paginated(items, total, query.page, query.limit);
+  }
+
+  async broadcastNotification(
+    adminId: string,
+    target: 'guardians' | 'members' | 'all',
+    title: string,
+    message: string,
+  ) {
+    if (!title || !message) {
+      throw new BadRequestException('Başlık ve mesaj alanları zorunludur.');
+    }
+
+    let roleFilter: string[] = [];
+    if (target === 'guardians') {
+      roleFilter = ['parent'];
+    } else if (target === 'members') {
+      roleFilter = ['child', 'elder'];
+    } else if (target === 'all') {
+      roleFilter = ['parent', 'child', 'elder'];
+    } else {
+      throw new BadRequestException('Geçersiz hedef kitle belirtildi.');
+    }
+
+    const users = await this.prisma.user.findMany({
+      where: { role: { in: roleFilter } },
+      select: { id: true }
+    });
+
+    const userIds = users.map(u => u.id);
+    if (userIds.length > 0) {
+      await this.notificationsService.sendOneSignalNotification(userIds, title, message, {
+        action: 'system_broadcast',
+        sentBy: adminId
+      });
+    }
+
+    await this.logAction(adminId, 'SYSTEM_BROADCAST', 'system', { target, title, message, userCount: userIds.length });
+
+    return { success: true, userCount: userIds.length };
+  }
+
+  async deleteUserTodayLocations(adminId: string, userId: string) {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const deleteResult = await this.prisma.location.deleteMany({
+      where: {
+        userId,
+        recordedAt: {
+          gte: todayStart,
+          lte: todayEnd,
+        },
+      },
+    });
+
+    await this.logAction(adminId, 'USER_TODAY_LOCATIONS_DELETE', userId, { count: deleteResult.count });
+    return { success: true, count: deleteResult.count };
+  }
+
+  async deleteAllTodayLocations(adminId: string) {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const deleteResult = await this.prisma.location.deleteMany({
+      where: {
+        recordedAt: {
+          gte: todayStart,
+          lte: todayEnd,
+        },
+      },
+    });
+
+    await this.logAction(adminId, 'ALL_TODAY_LOCATIONS_DELETE', 'system', { count: deleteResult.count });
+    return { success: true, count: deleteResult.count };
   }
 
   private paginated<T>(items: T[], total: number, page: number, limit: number) {
