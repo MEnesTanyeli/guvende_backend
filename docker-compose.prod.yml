@@ -35,6 +35,8 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-https://guvende.app,https://www.guvende.app,capacitor://localhost,http://localhost}
     ports:
       - "127.0.0.1:3001:3001"
+    volumes:
+      - backend_logs:/app/logs
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
@@ -62,3 +64,4 @@ services:
 
 volumes:
   postgres_data:
+  backend_logs:
