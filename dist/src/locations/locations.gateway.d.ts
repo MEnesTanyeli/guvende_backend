@@ -27,6 +27,13 @@ export declare class LocationsGateway implements OnGatewayConnection, OnGatewayD
         room: string;
         message?: undefined;
     }>;
+    handleJoinAdminControlRoom(client: Socket): Promise<{
+        status: string;
+        message: string;
+    } | {
+        status: string;
+        message?: undefined;
+    }>;
     handleLeaveFamily(data: {
         familyId: string;
     }, client: Socket): Promise<{

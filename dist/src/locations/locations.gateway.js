@@ -92,7 +92,7 @@ let LocationsGateway = class LocationsGateway {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json; charset=utf-8',
-                'Authorization': `Basic ${apiKey}`,
+                Authorization: `Basic ${apiKey}`,
                 'Content-Length': Buffer.byteLength(payloadStr),
             },
         };
@@ -140,7 +140,7 @@ let LocationsGateway = class LocationsGateway {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json; charset=utf-8',
-                'Authorization': `Basic ${apiKey}`,
+                Authorization: `Basic ${apiKey}`,
                 'Content-Length': Buffer.byteLength(payloadStr),
             },
         };
@@ -183,12 +183,48 @@ let LocationsGateway = class LocationsGateway {
             }
             const payload = this.jwtService.verify(token);
             const userId = payload.sub;
-            if (!userId) {
+            if (!userId || !payload.sid || payload.typ !== 'access') {
                 this.logger.warn(`Soket bağlantısı reddedildi: Geçersiz token payloadı. Cihaz: ${client.id}`);
                 client.disconnect(true);
                 return;
             }
+            const session = await this.prisma.session.findFirst({
+                where: {
+                    id: payload.sid,
+                    userId,
+                    revokedAt: null,
+                    expiresAt: { gt: new Date() },
+                },
+                select: { id: true },
+            });
+            if (!session) {
+                this.logger.warn(`Soket bağlantısı reddedildi: Oturum geçersiz. Cihaz: ${client.id}`);
+                client.disconnect(true);
+                return;
+            }
             client.data.userId = userId;
+            client.data.sessionId = session.id;
+            client.use(async (_packet, next) => {
+                const activeSession = await this.prisma.session.findFirst({
+                    where: {
+                        id: client.data.sessionId,
+                        userId: client.data.userId,
+                        revokedAt: null,
+                        expiresAt: { gt: new Date() },
+                    },
+                    select: { id: true },
+                });
+                if (!activeSession) {
+                    client.disconnect(true);
+                    next(new Error('Oturum kapatılmış veya süresi dolmuş.'));
+                    return;
+                }
+                next();
+            });
+            if (payload.exp) {
+                const remainingMs = Math.max(0, payload.exp * 1000 - Date.now());
+                client.data.authExpiryTimer = setTimeout(() => client.disconnect(true), remainingMs);
+            }
             let userSockets = this.activeUsers.get(userId);
             if (!userSockets) {
                 userSockets = new Set();
@@ -204,6 +240,9 @@ let LocationsGateway = class LocationsGateway {
         }
     }
     async handleDisconnect(client) {
+        if (client.data.authExpiryTimer) {
+            clearTimeout(client.data.authExpiryTimer);
+        }
         const userId = client.data.userId;
         if (userId) {
             const userSockets = this.activeUsers.get(userId);
@@ -272,12 +311,31 @@ let LocationsGateway = class LocationsGateway {
         });
         if (!isMember) {
             this.logger.warn(`Kullanıcı (${userId}) üye olmadığı odaya katılmaya çalıştı: family_${data.familyId}`);
-            return { status: 'error', message: 'Bu aile odasına katılma yetkiniz yok.' };
+            return {
+                status: 'error',
+                message: 'Bu aile odasına katılma yetkiniz yok.',
+            };
         }
         const room = `family_${data.familyId}`;
         client.join(room);
         this.logger.log(`İstemci (${client.id}), odaya katıldı: ${room}`);
         return { status: 'success', room };
+    }
+    async handleJoinAdminControlRoom(client) {
+        const userId = client.data.userId;
+        if (!userId) {
+            return { status: 'error', message: 'Yetkisiz erişim.' };
+        }
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: { role: true }
+        });
+        if (!user || user.role !== 'admin') {
+            return { status: 'error', message: 'Sadece yöneticiler katılabilir.' };
+        }
+        client.join('admin_control_room');
+        this.logger.log(`İstemci (${client.id}), admin_control_room odasına katıldı.`);
+        return { status: 'success' };
     }
     async handleLeaveFamily(data, client) {
         const userId = client.data.userId;
@@ -290,12 +348,16 @@ let LocationsGateway = class LocationsGateway {
         return { status: 'success', room };
     }
     async handleSendDeviceLock(data, client) {
-        return { status: 'error', message: 'Cihaz kilitleme özelliği devre dışı bırakılmıştır.' };
+        return {
+            status: 'error',
+            message: 'Cihaz kilitleme özelliği devre dışı bırakılmıştır.',
+        };
     }
     sendLocationUpdate(familyId, locationData) {
         const room = `family_${familyId}`;
         this.server.to(room).emit('location_update', locationData);
-        this.logger.log(`Odaya (${room}) yeni konum yayını yapıldı: ${JSON.stringify(locationData.userId)}`);
+        this.server.to('admin_control_room').emit('location_update', locationData);
+        this.logger.log(`Odaya (${room}) ve admin_control_room odasına yeni konum yayını yapıldı: ${JSON.stringify(locationData.userId)}`);
     }
     async sendAlertNotification(familyId, alertData) {
         try {
@@ -311,12 +373,13 @@ let LocationsGateway = class LocationsGateway {
             });
             let targetGuardians = guardians;
             if (senderId) {
-                targetGuardians = guardians.filter(g => g.userId !== senderId);
+                targetGuardians = guardians.filter((g) => g.userId !== senderId);
             }
             for (const guardian of targetGuardians) {
                 this.sendEventToUser(guardian.userId, 'alert_notification', alertData);
             }
-            this.logger.log(`Aile Grubu (${familyId}) için velilere (${targetGuardians.length} kişi) alarm bildirimi iletildi: ${alertData.title}`);
+            this.server.to('admin_control_room').emit('alert_notification', alertData);
+            this.logger.log(`Aile Grubu (${familyId}) için velilere (${targetGuardians.length} kişi) ve admin_control_room odasına alarm bildirimi iletildi: ${alertData.title}`);
         }
         catch (err) {
             this.logger.error(`Alarm bildirimi velilere gönderilirken hata oluştu: ${err.message}`);
@@ -349,6 +412,13 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], LocationsGateway.prototype, "handleJoinFamily", null);
 __decorate([
+    (0, websockets_1.SubscribeMessage)('joinAdminControlRoom'),
+    __param(0, (0, websockets_1.ConnectedSocket)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [socket_io_1.Socket]),
+    __metadata("design:returntype", Promise)
+], LocationsGateway.prototype, "handleJoinAdminControlRoom", null);
+__decorate([
     (0, websockets_1.SubscribeMessage)('leaveFamily'),
     __param(0, (0, websockets_1.MessageBody)()),
     __param(1, (0, websockets_1.ConnectedSocket)()),
@@ -367,7 +437,10 @@ __decorate([
 exports.LocationsGateway = LocationsGateway = __decorate([
     (0, websockets_1.WebSocketGateway)({
         cors: {
-            origin: '*',
+            origin: (process.env.CORS_ORIGINS || '')
+                .split(',')
+                .map((origin) => origin.trim())
+                .filter(Boolean),
         },
     }),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,

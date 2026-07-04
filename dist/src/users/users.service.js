@@ -103,18 +103,6 @@ let UsersService = class UsersService {
         });
         return this.findOne(id);
     }
-    async purchasePremiumMock(id) {
-        const premiumExpiresAt = new Date();
-        premiumExpiresAt.setMonth(premiumExpiresAt.getMonth() + 1);
-        await this.prisma.user.update({
-            where: { id },
-            data: {
-                isPremium: true,
-                premiumExpiresAt,
-            },
-        });
-        return this.findOne(id);
-    }
     async setProxy(userId, email) {
         const targetUser = await this.prisma.user.findUnique({
             where: { email: email.toLowerCase() },
@@ -199,71 +187,6 @@ let UsersService = class UsersService {
                 data: { proxyId: null },
             });
         }
-        return this.findOne(userId);
-    }
-    async requestEmailChange(userId, newEmail) {
-        const user = await this.prisma.user.findUnique({
-            where: { id: userId },
-        });
-        if (!user) {
-            throw new common_1.NotFoundException('Kullanıcı bulunamadı.');
-        }
-        const emailConflict = await this.prisma.user.findUnique({
-            where: { email: newEmail.toLowerCase() },
-        });
-        if (emailConflict) {
-            throw new common_1.ConflictException('Bu e-posta adresi zaten başka bir kullanıcı tarafından kullanılıyor.');
-        }
-        const changeCode = Math.floor(100000 + Math.random() * 900000).toString();
-        const expiry = new Date();
-        expiry.setMinutes(expiry.getMinutes() + 10);
-        await this.prisma.user.update({
-            where: { id: userId },
-            data: {
-                emailChangeOtpCode: changeCode,
-                emailChangeNewEmail: newEmail.toLowerCase(),
-                emailChangeOtpExpiresAt: expiry,
-            },
-        });
-        console.log(`\n==================================================`);
-        console.log(`📧 E-POSTA DEĞİŞİKLİK ONAY KODU (${user.email} -> ${newEmail}): ${changeCode}`);
-        console.log(`==================================================\n`);
-        return {
-            message: 'E-posta değişiklik doğrulama kodu eski e-posta adresinize gönderildi (Loglara yazdırıldı).',
-        };
-    }
-    async confirmEmailChange(userId, code) {
-        const user = await this.prisma.user.findUnique({
-            where: { id: userId },
-        });
-        if (!user) {
-            throw new common_1.NotFoundException('Kullanıcı bulunamadı.');
-        }
-        if (!user.emailChangeOtpCode || user.emailChangeOtpCode !== code) {
-            throw new common_1.BadRequestException('Geçersiz doğrulama kodu.');
-        }
-        if (!user.emailChangeOtpExpiresAt || user.emailChangeOtpExpiresAt < new Date()) {
-            throw new common_1.BadRequestException('Doğrulama kodunun süresi dolmuş.');
-        }
-        const newEmail = user.emailChangeNewEmail;
-        if (!newEmail) {
-            throw new common_1.BadRequestException('Bekleyen e-posta degisikligi bulunamadi.');
-        }
-        const emailConflict = await this.prisma.user.findUnique({
-            where: { email: newEmail },
-        });
-        if (emailConflict && emailConflict.id !== userId) {
-            throw new common_1.ConflictException('Bu e-posta adresi zaten başka bir kullanıcı tarafından kullanılıyor.');
-        }
-        await this.prisma.user.update({
-            where: { id: userId },
-            data: {
-                email: newEmail,
-                emailChangeOtpCode: null,
-                emailChangeNewEmail: null,
-                emailChangeOtpExpiresAt: null,
-            },
-        });
         return this.findOne(userId);
     }
     async resetDevice(guardianId, childId) {

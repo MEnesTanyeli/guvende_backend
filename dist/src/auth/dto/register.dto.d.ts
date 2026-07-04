@@ -6,4 +6,5 @@ export declare class RegisterDto {
     role?: string;
     gender?: string;
     code: string;
+    deviceId?: string;
 }

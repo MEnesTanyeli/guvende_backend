@@ -27,17 +27,43 @@ let AdminController = class AdminController {
     }
     dashboard() { return this.adminService.dashboard(); }
     users(query) { return this.adminService.users(query); }
+    user(id) { return this.adminService.user(id); }
+    userHistory(adminId, userId, dateStr) {
+        return this.adminService.userHistory(adminId, userId, dateStr);
+    }
     updateUser(adminId, id, dto) {
         return this.adminService.updateUser(adminId, id, dto);
+    }
+    resetDevice(adminId, id) {
+        return this.adminService.resetDevice(adminId, id);
     }
     deleteUser(adminId, id) {
         return this.adminService.deleteUser(adminId, id);
     }
+    deleteUserTodayLocations(adminId, userId) {
+        return this.adminService.deleteUserTodayLocations(adminId, userId);
+    }
+    deleteAllTodayLocations(adminId) {
+        return this.adminService.deleteAllTodayLocations(adminId);
+    }
     families(query) { return this.adminService.families(query); }
     family(id) { return this.adminService.family(id); }
-    deleteFamily(id) { return this.adminService.deleteFamily(id); }
+    latestLocations() {
+        return this.adminService.latestLocations();
+    }
+    deleteFamily(adminId, id) {
+        return this.adminService.deleteFamily(adminId, id);
+    }
     alerts(query) { return this.adminService.alerts(query); }
-    resolveAlert(id) { return this.adminService.resolveAlert(id); }
+    resolveAlert(adminId, id) {
+        return this.adminService.resolveAlert(adminId, id);
+    }
+    auditLogs(query) {
+        return this.adminService.auditLogs(query);
+    }
+    broadcast(adminId, target, title, message) {
+        return this.adminService.broadcastNotification(adminId, target, title, message);
+    }
 };
 exports.AdminController = AdminController;
 __decorate([
@@ -54,6 +80,22 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "users", null);
 __decorate([
+    (0, common_1.Get)('users/:id'),
+    __param(0, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "user", null);
+__decorate([
+    (0, common_1.Get)('users/:userId/locations/history'),
+    __param(0, (0, get_user_decorator_1.GetUser)('id')),
+    __param(1, (0, common_1.Param)('userId')),
+    __param(2, (0, common_1.Query)('date')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "userHistory", null);
+__decorate([
     (0, common_1.Patch)('users/:id'),
     __param(0, (0, get_user_decorator_1.GetUser)('id')),
     __param(1, (0, common_1.Param)('id')),
@@ -63,6 +105,14 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "updateUser", null);
 __decorate([
+    (0, common_1.Patch)('users/:id/reset-device'),
+    __param(0, (0, get_user_decorator_1.GetUser)('id')),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "resetDevice", null);
+__decorate([
     (0, common_1.Delete)('users/:id'),
     __param(0, (0, get_user_decorator_1.GetUser)('id')),
     __param(1, (0, common_1.Param)('id')),
@@ -70,6 +120,21 @@ __decorate([
     __metadata("design:paramtypes", [String, String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "deleteUser", null);
+__decorate([
+    (0, common_1.Delete)('users/:userId/locations/today'),
+    __param(0, (0, get_user_decorator_1.GetUser)('id')),
+    __param(1, (0, common_1.Param)('userId')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "deleteUserTodayLocations", null);
+__decorate([
+    (0, common_1.Delete)('locations/today'),
+    __param(0, (0, get_user_decorator_1.GetUser)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "deleteAllTodayLocations", null);
 __decorate([
     (0, common_1.Get)('families'),
     __param(0, (0, common_1.Query)()),
@@ -85,10 +150,17 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "family", null);
 __decorate([
-    (0, common_1.Delete)('families/:id'),
-    __param(0, (0, common_1.Param)('id')),
+    (0, common_1.Get)('locations/latest'),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "latestLocations", null);
+__decorate([
+    (0, common_1.Delete)('families/:id'),
+    __param(0, (0, get_user_decorator_1.GetUser)('id')),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "deleteFamily", null);
 __decorate([
@@ -100,11 +172,29 @@ __decorate([
 ], AdminController.prototype, "alerts", null);
 __decorate([
     (0, common_1.Patch)('alerts/:id/resolve'),
-    __param(0, (0, common_1.Param)('id')),
+    __param(0, (0, get_user_decorator_1.GetUser)('id')),
+    __param(1, (0, common_1.Param)('id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
+    __metadata("design:paramtypes", [String, String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "resolveAlert", null);
+__decorate([
+    (0, common_1.Get)('audit-logs'),
+    __param(0, (0, common_1.Query)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [admin_query_dto_1.AdminQueryDto]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "auditLogs", null);
+__decorate([
+    (0, common_1.Post)('notifications/broadcast'),
+    __param(0, (0, get_user_decorator_1.GetUser)('id')),
+    __param(1, (0, common_1.Body)('target')),
+    __param(2, (0, common_1.Body)('title')),
+    __param(3, (0, common_1.Body)('message')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String, String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "broadcast", null);
 exports.AdminController = AdminController = __decorate([
     (0, common_1.Controller)('admin'),
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard, admin_guard_1.AdminGuard),

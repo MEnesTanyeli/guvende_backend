@@ -1,10 +1,8 @@
 import { LocationsService } from './locations.service';
 import { RecordLocationDto } from './dto/record-location.dto';
-import { LocationsGateway } from './locations.gateway';
 export declare class LocationsController {
     private locationsService;
-    private locationsGateway;
-    constructor(locationsService: LocationsService, locationsGateway: LocationsGateway);
+    constructor(locationsService: LocationsService);
     recordLocation(userId: string, dto: RecordLocationDto): Promise<{
         user: {
             id: string;
@@ -58,10 +56,4 @@ export declare class LocationsController {
         success: boolean;
     }>;
     deleteTodayLocations(userId: string, familyId: string, targetUserId: string): Promise<import(".prisma/client").Prisma.BatchPayload>;
-    triggerTestDrift(userId: string, familyId: string, targetUserId: string): Promise<{
-        success: boolean;
-    }>;
-    triggerTestWalk(userId: string, familyId: string, targetUserId: string): Promise<{
-        success: boolean;
-    }>;
 }

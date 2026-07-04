@@ -18,22 +18,6 @@ const users_service_1 = require("./users.service");
 const jwt_auth_guard_1 = require("../auth/guards/jwt-auth.guard");
 const get_user_decorator_1 = require("../auth/decorators/get-user.decorator");
 const class_validator_1 = require("class-validator");
-class RequestEmailChangeDto {
-    newEmail;
-}
-__decorate([
-    (0, class_validator_1.IsEmail)({}, { message: 'Geçerli bir yeni e-posta adresi giriniz.' }),
-    (0, class_validator_1.IsNotEmpty)({ message: 'Yeni e-posta alanı boş bırakılamaz.' }),
-    __metadata("design:type", String)
-], RequestEmailChangeDto.prototype, "newEmail", void 0);
-class ConfirmEmailChangeDto {
-    code;
-}
-__decorate([
-    (0, class_validator_1.IsString)(),
-    (0, class_validator_1.IsNotEmpty)({ message: 'Doğrulama kodu boş bırakılamaz.' }),
-    __metadata("design:type", String)
-], ConfirmEmailChangeDto.prototype, "code", void 0);
 class UpdateProfileDto {
     name;
     phone;
@@ -65,9 +49,6 @@ let UsersController = class UsersController {
     async updateProfile(userId, dto) {
         return this.usersService.updateProfile(userId, dto.name, dto.phone, dto.gender);
     }
-    async purchasePremiumMock(userId) {
-        return this.usersService.purchasePremiumMock(userId);
-    }
     async setProxy(userId, body) {
         return this.usersService.setProxy(userId, body.email);
     }
@@ -76,12 +57,6 @@ let UsersController = class UsersController {
     }
     async removeProxyPost(userId) {
         return this.usersService.removeProxy(userId);
-    }
-    async requestEmailChange(userId, dto) {
-        return this.usersService.requestEmailChange(userId, dto.newEmail);
-    }
-    async confirmEmailChange(userId, dto) {
-        return this.usersService.confirmEmailChange(userId, dto.code);
     }
     async resetDevice(guardianId, childId) {
         return this.usersService.resetDevice(guardianId, childId);
@@ -107,13 +82,6 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], UsersController.prototype, "updateProfile", null);
 __decorate([
-    (0, common_1.Post)('purchase-mock'),
-    __param(0, (0, get_user_decorator_1.GetUser)('id')),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
-    __metadata("design:returntype", Promise)
-], UsersController.prototype, "purchasePremiumMock", null);
-__decorate([
     (0, common_1.Post)('proxy'),
     __param(0, (0, get_user_decorator_1.GetUser)('id')),
     __param(1, (0, common_1.Body)()),
@@ -135,22 +103,6 @@ __decorate([
     __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", Promise)
 ], UsersController.prototype, "removeProxyPost", null);
-__decorate([
-    (0, common_1.Post)('request-email-change'),
-    __param(0, (0, get_user_decorator_1.GetUser)('id')),
-    __param(1, (0, common_1.Body)()),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, RequestEmailChangeDto]),
-    __metadata("design:returntype", Promise)
-], UsersController.prototype, "requestEmailChange", null);
-__decorate([
-    (0, common_1.Post)('confirm-email-change'),
-    __param(0, (0, get_user_decorator_1.GetUser)('id')),
-    __param(1, (0, common_1.Body)()),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, ConfirmEmailChangeDto]),
-    __metadata("design:returntype", Promise)
-], UsersController.prototype, "confirmEmailChange", null);
 __decorate([
     (0, common_1.Post)(':id/reset-device'),
     __param(0, (0, get_user_decorator_1.GetUser)('id')),

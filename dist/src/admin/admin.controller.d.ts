@@ -45,6 +45,62 @@ export declare class AdminController {
         limit: number;
         pages: number;
     }>;
+    user(id: string): Promise<{
+        latestLocation: {
+            latitude: number;
+            longitude: number;
+            batteryLevel: number | null;
+            isCharging: boolean | null;
+            connectionStatus: string;
+            recordedAt: Date;
+        } | null;
+        id: string;
+        email: string;
+        name: string;
+        phone: string | null;
+        role: string;
+        trialEndsAt: Date;
+        isPremium: boolean;
+        premiumExpiresAt: Date | null;
+        deviceId: string | null;
+        loginAllowed: boolean;
+        createdAt: Date;
+        devicePermissions: import("@prisma/client/runtime/library").JsonValue;
+        memberships: ({
+            family: {
+                id: string;
+                name: string;
+            };
+        } & {
+            id: string;
+            createdAt: Date;
+            familyId: string;
+            userId: string;
+            memberType: import(".prisma/client").$Enums.MemberType;
+            permissions: string[];
+            muteNotifications: boolean;
+        })[];
+        alerts: {
+            id: string;
+            createdAt: Date;
+            message: string;
+            familyId: string;
+            userId: string;
+            type: import(".prisma/client").$Enums.AlertType;
+            title: string;
+            status: import(".prisma/client").$Enums.AlertStatus;
+            metadata: import("@prisma/client/runtime/library").JsonValue | null;
+            resolvedAt: Date | null;
+        }[];
+    }>;
+    userHistory(adminId: string, userId: string, dateStr?: string): Promise<{
+        id: string;
+        latitude: number;
+        longitude: number;
+        speed: number | null;
+        batteryLevel: number | null;
+        recordedAt: Date;
+    }[]>;
     updateUser(adminId: string, id: string, dto: UpdateAdminUserDto): Promise<{
         id: string;
         email: string;
@@ -54,8 +110,20 @@ export declare class AdminController {
         isPremium: boolean;
         premiumExpiresAt: Date | null;
     }>;
+    resetDevice(adminId: string, id: string): Promise<{
+        success: boolean;
+        message: string;
+    }>;
     deleteUser(adminId: string, id: string): Promise<{
         success: boolean;
+    }>;
+    deleteUserTodayLocations(adminId: string, userId: string): Promise<{
+        success: boolean;
+        count: number;
+    }>;
+    deleteAllTodayLocations(adminId: string): Promise<{
+        success: boolean;
+        count: number;
     }>;
     families(query: AdminQueryDto): Promise<{
         items: ({
@@ -138,7 +206,26 @@ export declare class AdminController {
         type: string;
         ownerId: string;
     }>;
-    deleteFamily(id: string): Promise<{
+    latestLocations(): Promise<(({
+        user: {
+            id: string;
+            email: string;
+            name: string;
+            role: string;
+        };
+    } & {
+        id: string;
+        userId: string;
+        latitude: number;
+        longitude: number;
+        accuracy: number | null;
+        speed: number | null;
+        batteryLevel: number | null;
+        isCharging: boolean | null;
+        connectionStatus: string;
+        recordedAt: Date;
+    }) | null)[]>;
+    deleteFamily(adminId: string, id: string): Promise<{
         success: boolean;
     }>;
     alerts(query: AlertQueryDto): Promise<{
@@ -169,7 +256,7 @@ export declare class AdminController {
         limit: number;
         pages: number;
     }>;
-    resolveAlert(id: string): Promise<{
+    resolveAlert(adminId: string, id: string): Promise<{
         id: string;
         createdAt: Date;
         message: string;
@@ -180,5 +267,29 @@ export declare class AdminController {
         status: import(".prisma/client").$Enums.AlertStatus;
         metadata: import("@prisma/client/runtime/library").JsonValue | null;
         resolvedAt: Date | null;
+    }>;
+    auditLogs(query: AdminQueryDto): Promise<{
+        items: ({
+            admin: {
+                id: string;
+                email: string;
+                name: string;
+            };
+        } & {
+            id: string;
+            createdAt: Date;
+            action: string;
+            targetId: string;
+            details: import("@prisma/client/runtime/library").JsonValue;
+            adminId: string;
+        })[];
+        total: number;
+        page: number;
+        limit: number;
+        pages: number;
+    }>;
+    broadcast(adminId: string, target: 'guardians' | 'members' | 'all', title: string, message: string): Promise<{
+        success: boolean;
+        userCount: number;
     }>;
 }

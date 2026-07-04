@@ -21,6 +21,7 @@ const jwt_auth_guard_1 = require("./guards/jwt-auth.guard");
 const get_user_decorator_1 = require("./decorators/get-user.decorator");
 const class_validator_1 = require("class-validator");
 const throttler_1 = require("@nestjs/throttler");
+const session_dto_1 = require("./dto/session.dto");
 class ForgotPasswordDto {
     email;
 }
@@ -69,6 +70,15 @@ let AuthController = class AuthController {
     async adminLogin(dto) {
         return this.authService.adminLogin(dto);
     }
+    async refresh(dto) {
+        return this.authService.refresh(dto.refreshToken);
+    }
+    async logout(user) {
+        return this.authService.logout(user.sessionId);
+    }
+    async logoutAll(user) {
+        return this.authService.logoutAll(user.id);
+    }
     async forgotPassword(dto) {
         return this.authService.forgotPassword(dto.email);
     }
@@ -81,7 +91,7 @@ let AuthController = class AuthController {
 };
 exports.AuthController = AuthController;
 __decorate([
-    (0, throttler_1.Throttle)({ default: { limit: 3, ttl: 60_000 } }),
+    (0, throttler_1.Throttle)({ default: { limit: 10, ttl: 15 * 60_000 } }),
     (0, common_1.Post)('register/send-code'),
     __param(0, (0, common_1.Body)('email')),
     __metadata("design:type", Function),
@@ -89,7 +99,7 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "sendRegisterCode", null);
 __decorate([
-    (0, throttler_1.Throttle)({ default: { limit: 5, ttl: 60_000 } }),
+    (0, throttler_1.Throttle)({ default: { limit: 5, ttl: 15 * 60_000 } }),
     (0, common_1.Post)('register'),
     __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -113,7 +123,31 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "adminLogin", null);
 __decorate([
-    (0, throttler_1.Throttle)({ default: { limit: 3, ttl: 60_000 } }),
+    (0, throttler_1.Throttle)({ default: { limit: 20, ttl: 60_000 } }),
+    (0, common_1.Post)('refresh'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [session_dto_1.RefreshTokenDto]),
+    __metadata("design:returntype", Promise)
+], AuthController.prototype, "refresh", null);
+__decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Post)('logout'),
+    __param(0, (0, get_user_decorator_1.GetUser)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], AuthController.prototype, "logout", null);
+__decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Post)('logout-all'),
+    __param(0, (0, get_user_decorator_1.GetUser)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], AuthController.prototype, "logoutAll", null);
+__decorate([
+    (0, throttler_1.Throttle)({ default: { limit: 10, ttl: 15 * 60_000 } }),
     (0, common_1.Post)('forgot-password'),
     __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -121,7 +155,7 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "forgotPassword", null);
 __decorate([
-    (0, throttler_1.Throttle)({ default: { limit: 5, ttl: 60_000 } }),
+    (0, throttler_1.Throttle)({ default: { limit: 5, ttl: 15 * 60_000 } }),
     (0, common_1.Post)('reset-password'),
     __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),

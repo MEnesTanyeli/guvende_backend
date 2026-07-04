@@ -46,28 +46,6 @@ export declare class UsersService {
         devicePermissions: import("@prisma/client/runtime/library").JsonValue;
         createdAt: Date;
     }>;
-    purchasePremiumMock(id: string): Promise<{
-        id: string;
-        email: string;
-        name: string;
-        phone: string | null;
-        role: string;
-        gender: string | null;
-        trialEndsAt: Date;
-        isPremium: boolean | null;
-        premiumExpiresAt: Date | null;
-        isGuardian: boolean;
-        isInFamily: boolean;
-        isProxy: boolean;
-        proxy: {
-            id: string;
-            email: string;
-            name: string;
-        } | null;
-        isLocked: boolean;
-        devicePermissions: import("@prisma/client/runtime/library").JsonValue;
-        createdAt: Date;
-    }>;
     setProxy(userId: string, email: string): Promise<{
         id: string;
         email: string;
@@ -91,31 +69,6 @@ export declare class UsersService {
         createdAt: Date;
     }>;
     removeProxy(userId: string): Promise<{
-        id: string;
-        email: string;
-        name: string;
-        phone: string | null;
-        role: string;
-        gender: string | null;
-        trialEndsAt: Date;
-        isPremium: boolean | null;
-        premiumExpiresAt: Date | null;
-        isGuardian: boolean;
-        isInFamily: boolean;
-        isProxy: boolean;
-        proxy: {
-            id: string;
-            email: string;
-            name: string;
-        } | null;
-        isLocked: boolean;
-        devicePermissions: import("@prisma/client/runtime/library").JsonValue;
-        createdAt: Date;
-    }>;
-    requestEmailChange(userId: string, newEmail: string): Promise<{
-        message: string;
-    }>;
-    confirmEmailChange(userId: string, code: string): Promise<{
         id: string;
         email: string;
         name: string;

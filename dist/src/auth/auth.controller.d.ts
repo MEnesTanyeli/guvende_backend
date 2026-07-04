@@ -1,6 +1,7 @@
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { RefreshTokenDto } from './dto/session.dto';
 declare class ForgotPasswordDto {
     email: string;
 }
@@ -14,11 +15,12 @@ export declare class AuthController {
     constructor(authService: AuthService);
     sendRegisterCode(email: string): Promise<{
         success: boolean;
+        codeSent: boolean;
         message: string;
+        expiresAt: Date;
+        remainingSeconds: number;
     }>;
     register(dto: RegisterDto): Promise<{
-        message: string;
-        token: string;
         user: {
             id: string;
             email: string;
@@ -41,10 +43,14 @@ export declare class AuthController {
             devicePermissions: import("@prisma/client/runtime/library").JsonValue;
             createdAt: Date;
         };
+        token: string;
+        accessToken: string;
+        refreshToken: string;
+        accessTokenExpiresIn: number;
+        refreshTokenExpiresAt: Date;
+        message: string;
     }>;
     login(dto: LoginDto): Promise<{
-        message: string;
-        token: string;
         user: {
             id: string;
             email: string;
@@ -67,10 +73,14 @@ export declare class AuthController {
             devicePermissions: import("@prisma/client/runtime/library").JsonValue;
             createdAt: Date;
         };
+        token: string;
+        accessToken: string;
+        refreshToken: string;
+        accessTokenExpiresIn: number;
+        refreshTokenExpiresAt: Date;
+        message: string;
     }>;
     adminLogin(dto: LoginDto): Promise<{
-        message: string;
-        token: string;
         user: {
             id: string;
             email: string;
@@ -93,9 +103,36 @@ export declare class AuthController {
             devicePermissions: import("@prisma/client/runtime/library").JsonValue;
             createdAt: Date;
         };
+        token: string;
+        accessToken: string;
+        refreshToken: string;
+        accessTokenExpiresIn: number;
+        refreshTokenExpiresAt: Date;
+        message: string;
+    }>;
+    refresh(dto: RefreshTokenDto): Promise<{
+        token: string;
+        accessToken: string;
+        refreshToken: string;
+        accessTokenExpiresIn: number;
+        refreshTokenExpiresAt: Date;
+    }>;
+    logout(user: any): Promise<{
+        message: string;
+    }>;
+    logoutAll(user: any): Promise<{
+        message: string;
     }>;
     forgotPassword(dto: ForgotPasswordDto): Promise<{
         message: string;
+        codeSent?: undefined;
+        expiresAt?: undefined;
+        remainingSeconds?: undefined;
+    } | {
+        message: string;
+        codeSent: boolean;
+        expiresAt: Date;
+        remainingSeconds: number;
     }>;
     resetPassword(dto: ResetPasswordDto): Promise<{
         message: string;

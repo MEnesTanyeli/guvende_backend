@@ -13,10 +13,10 @@ export declare class AppUsageService {
     getMemberAppUsage(userId: string, targetUserId: string): Promise<{
         id: string;
         userId: string;
+        lastUsedAt: Date;
         packageName: string;
         appName: string;
         durationMin: number;
-        lastUsedAt: Date;
         recordedDate: Date;
     }[]>;
 }

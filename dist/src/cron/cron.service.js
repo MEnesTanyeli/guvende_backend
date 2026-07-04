@@ -128,7 +128,9 @@ let CronService = class CronService {
             });
             if (locations.length >= 2 &&
                 locations[0].recordedAt >= thirtyMinutesAgo &&
-                (locations[0].recordedAt.getTime() - locations[locations.length - 1].recordedAt.getTime() >= 7.5 * 60 * 60 * 1000)) {
+                locations[0].recordedAt.getTime() -
+                    locations[locations.length - 1].recordedAt.getTime() >=
+                    7.5 * 60 * 60 * 1000) {
                 const latestLoc = locations[0];
                 const isInactive = locations.every((loc) => {
                     const distance = this.getDistanceInMeters(loc.latitude, loc.longitude, latestLoc.latitude, latestLoc.longitude);
@@ -189,7 +191,7 @@ let CronService = class CronService {
         });
         const nowInIstanbul = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Istanbul' }));
         const today = new Date(nowInIstanbul.getFullYear(), nowInIstanbul.getMonth(), nowInIstanbul.getDate());
-        const filteredReminders = activeReminders.filter(reminder => {
+        const filteredReminders = activeReminders.filter((reminder) => {
             const start = new Date(reminder.startDate);
             const startDateOnly = new Date(start.getFullYear(), start.getMonth(), start.getDate());
             if (startDateOnly > today) {
@@ -239,7 +241,9 @@ let CronService = class CronService {
                 where: { userId },
                 orderBy: { recordedAt: 'desc' },
             });
-            if (lastLocation && lastLocation.recordedAt < sevenMinutesAgo && lastLocation.recordedAt > fifteenMinutesAgo) {
+            if (lastLocation &&
+                lastLocation.recordedAt < sevenMinutesAgo &&
+                lastLocation.recordedAt > fifteenMinutesAgo) {
                 this.logger.log(`Kullanıcı (${userId}) için sessiz ping bildirimi gönderiliyor...`);
                 await this.locationsGateway.sendSilentPushNotification([userId], {
                     action: 'ping',
@@ -263,6 +267,18 @@ let CronService = class CronService {
         }
         catch (error) {
             this.logger.error(`Eski konum kayıtları temizlenirken hata oluştu: ${error.message}`);
+        }
+    }
+    async handleSessionsCleanup() {
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        try {
+            const deleteResult = await this.prisma.session.deleteMany({
+                where: { expiresAt: { lt: thirtyDaysAgo } },
+            });
+            this.logger.log(`Eski session temizliği tamamlandı. Silinen kayıt: ${deleteResult.count}`);
+        }
+        catch (error) {
+            this.logger.error(`Eski session kayıtları temizlenirken hata oluştu: ${error.message}`);
         }
     }
 };
@@ -297,6 +313,12 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", Promise)
 ], CronService.prototype, "handleLocationsCleanup", null);
+__decorate([
+    (0, schedule_1.Cron)('0 30 3 * * *'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", Promise)
+], CronService.prototype, "handleSessionsCleanup", null);
 exports.CronService = CronService = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,

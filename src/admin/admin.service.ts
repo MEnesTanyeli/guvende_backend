@@ -58,7 +58,11 @@ export class AdminService {
         { phone: { contains: query.search, mode: 'insensitive' } },
       ];
     }
-    if (query.role) where.role = query.role;
+    if (query.role) {
+      where.role = query.role;
+    } else {
+      where.role = { not: 'admin' };
+    }
     if (query.subscription === 'premium') {
       where.isPremium = true;
       where.premiumExpiresAt = { gt: now };
@@ -126,6 +130,8 @@ export class AdminService {
       where: { userId: id },
       orderBy: { recordedAt: 'desc' },
       select: {
+        latitude: true,
+        longitude: true,
         batteryLevel: true,
         isCharging: true,
         connectionStatus: true,
@@ -205,6 +211,13 @@ export class AdminService {
     const userBefore = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: true, isPremium: true } });
     if (!userBefore) throw new NotFoundException('Kullanıcı bulunamadı.');
 
+    if (userBefore.role === 'admin' && dto.role && dto.role !== 'admin') {
+      throw new BadRequestException('Diğer yöneticilerin yetkilerini değiştiremezsiniz.');
+    }
+    if (dto.role === 'admin' && userBefore.role !== 'admin') {
+      throw new BadRequestException('Bu panelden yeni yönetici atayamazsınız.');
+    }
+
     const user = await this.prisma.user.update({
       where: { id: userId },
       data: {
@@ -230,8 +243,9 @@ export class AdminService {
 
   async deleteUser(adminId: string, userId: string) {
     if (adminId === userId) throw new BadRequestException('Kendi yönetici hesabınızı silemezsiniz.');
-    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true, email: true } });
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true, email: true, role: true } });
     if (!user) throw new NotFoundException('Kullanıcı bulunamadı.');
+    if (user.role === 'admin') throw new BadRequestException('Yönetici hesaplarını bu panelden silemezsiniz.');
     await this.prisma.user.delete({ where: { id: userId } });
     await this.logAction(adminId, 'USER_DELETE', userId, { name: user.name, email: user.email });
     return { success: true };
@@ -388,11 +402,11 @@ export class AdminService {
 
     let roleFilter: string[] = [];
     if (target === 'guardians') {
-      roleFilter = ['parent'];
+      roleFilter = ['guardian'];
     } else if (target === 'members') {
       roleFilter = ['child', 'elder'];
     } else if (target === 'all') {
-      roleFilter = ['parent', 'child', 'elder'];
+      roleFilter = ['guardian', 'child', 'elder'];
     } else {
       throw new BadRequestException('Geçersiz hedef kitle belirtildi.');
     }

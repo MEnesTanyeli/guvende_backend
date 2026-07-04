@@ -19,6 +19,7 @@ class RegisterDto {
     role;
     gender;
     code;
+    deviceId;
 }
 exports.RegisterDto = RegisterDto;
 __decorate([
@@ -45,7 +46,9 @@ __decorate([
 __decorate([
     (0, class_validator_1.IsString)(),
     (0, class_validator_1.IsOptional)(),
-    (0, class_validator_1.IsIn)(['guardian', 'child', 'elder'], { message: 'Geçersiz hesap türü seçildi.' }),
+    (0, class_validator_1.IsIn)(['guardian', 'child', 'elder'], {
+        message: 'Geçersiz hesap türü seçildi.',
+    }),
     __metadata("design:type", String)
 ], RegisterDto.prototype, "role", void 0);
 __decorate([
@@ -59,4 +62,9 @@ __decorate([
     (0, class_validator_1.IsNotEmpty)({ message: 'Doğrulama kodu boş bırakılamaz.' }),
     __metadata("design:type", String)
 ], RegisterDto.prototype, "code", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsOptional)(),
+    __metadata("design:type", String)
+], RegisterDto.prototype, "deviceId", void 0);
 //# sourceMappingURL=register.dto.js.map

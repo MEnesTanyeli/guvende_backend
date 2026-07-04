@@ -1,10 +1,4 @@
 import { UsersService } from './users.service';
-declare class RequestEmailChangeDto {
-    newEmail: string;
-}
-declare class ConfirmEmailChangeDto {
-    code: string;
-}
 declare class UpdateProfileDto {
     name?: string;
     phone?: string;
@@ -36,28 +30,6 @@ export declare class UsersController {
         createdAt: Date;
     }>;
     updateProfile(userId: string, dto: UpdateProfileDto): Promise<{
-        id: string;
-        email: string;
-        name: string;
-        phone: string | null;
-        role: string;
-        gender: string | null;
-        trialEndsAt: Date;
-        isPremium: boolean | null;
-        premiumExpiresAt: Date | null;
-        isGuardian: boolean;
-        isInFamily: boolean;
-        isProxy: boolean;
-        proxy: {
-            id: string;
-            email: string;
-            name: string;
-        } | null;
-        isLocked: boolean;
-        devicePermissions: import("@prisma/client/runtime/library").JsonValue;
-        createdAt: Date;
-    }>;
-    purchasePremiumMock(userId: string): Promise<{
         id: string;
         email: string;
         name: string;
@@ -126,31 +98,6 @@ export declare class UsersController {
         createdAt: Date;
     }>;
     removeProxyPost(userId: string): Promise<{
-        id: string;
-        email: string;
-        name: string;
-        phone: string | null;
-        role: string;
-        gender: string | null;
-        trialEndsAt: Date;
-        isPremium: boolean | null;
-        premiumExpiresAt: Date | null;
-        isGuardian: boolean;
-        isInFamily: boolean;
-        isProxy: boolean;
-        proxy: {
-            id: string;
-            email: string;
-            name: string;
-        } | null;
-        isLocked: boolean;
-        devicePermissions: import("@prisma/client/runtime/library").JsonValue;
-        createdAt: Date;
-    }>;
-    requestEmailChange(userId: string, dto: RequestEmailChangeDto): Promise<{
-        message: string;
-    }>;
-    confirmEmailChange(userId: string, dto: ConfirmEmailChangeDto): Promise<{
         id: string;
         email: string;
         name: string;
