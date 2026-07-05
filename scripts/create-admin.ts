@@ -8,8 +8,8 @@ async function main() {
   const password = process.env.ADMIN_PASSWORD;
   const name = process.env.ADMIN_NAME?.trim() || 'Güvende Yöneticisi';
 
-  if (!email || !password || password.length < 8) {
-    throw new Error('ADMIN_EMAIL ve en az 8 karakterli ADMIN_PASSWORD tanımlanmalıdır.');
+  if (!email || !password || password.length < 6) {
+    throw new Error('ADMIN_EMAIL ve en az 6 karakterli ADMIN_PASSWORD tanımlanmalıdır.');
   }
 
   const passwordHash = await bcrypt.hash(password, 12);
