@@ -21,36 +21,85 @@ export class AppUsageService {
     return !!common;
   }
 
-  async saveAppUsage(userId: string, usages: Array<{ packageName: string; appName: string; durationMin: number }>) {
-    const startOfToday = new Date();
+  async saveAppUsage(
+    userId: string,
+    usages: Array<{ packageName: string; appName: string; durationMin: number }>,
+    recordedDateStr?: string,
+  ) {
+    const startOfToday = recordedDateStr ? new Date(recordedDateStr) : new Date();
     startOfToday.setHours(0, 0, 0, 0);
 
-    const promises = usages.map((usage) => {
-      return this.prisma.appUsage.upsert({
-        where: {
-          userId_packageName_recordedDate: {
-            userId,
-            packageName: usage.packageName,
-            recordedDate: startOfToday,
-          },
-        },
-        update: {
-          durationMin: usage.durationMin,
-          appName: usage.appName,
-          lastUsedAt: new Date(),
-        },
-        create: {
+    // 1. O güne ait mevcut kayıtları tek seferde çek (select yükünü minimize et)
+    const existingUsages = await this.prisma.appUsage.findMany({
+      where: {
+        userId,
+        recordedDate: startOfToday,
+      },
+    });
+
+    const existingMap = new Map(existingUsages.map((u) => [u.packageName, u]));
+
+    const toCreate: Array<{
+      userId: string;
+      packageName: string;
+      appName: string;
+      durationMin: number;
+      recordedDate: Date;
+      lastUsedAt: Date;
+    }> = [];
+    
+    const toUpdate: Array<{
+      id: string;
+      durationMin: number;
+      appName: string;
+    }> = [];
+
+    // 2. Bellekte karşılaştır ve sadece değişen/yeni verileri belirle
+    for (const usage of usages) {
+      const existing = existingMap.get(usage.packageName);
+      if (existing) {
+        // Süre değiştiyse veya adı güncellendiyse listeye ekle
+        if (existing.durationMin !== usage.durationMin) {
+          toUpdate.push({
+            id: existing.id,
+            durationMin: usage.durationMin,
+            appName: usage.appName,
+          });
+        }
+      } else {
+        toCreate.push({
           userId,
           packageName: usage.packageName,
           appName: usage.appName,
           durationMin: usage.durationMin,
           recordedDate: startOfToday,
           lastUsedAt: new Date(),
-        },
-      });
-    });
+        });
+      }
+    }
 
-    await Promise.all(promises);
+    // 3. Toplu sorguları çalıştır (veritabanı transaction yükünü azalt)
+    if (toCreate.length > 0) {
+      await this.prisma.appUsage.createMany({
+        data: toCreate,
+      });
+    }
+
+    if (toUpdate.length > 0) {
+      await Promise.all(
+        toUpdate.map((u) =>
+          this.prisma.appUsage.update({
+            where: { id: u.id },
+            data: {
+              durationMin: u.durationMin,
+              appName: u.appName,
+              lastUsedAt: new Date(),
+            },
+          }),
+        ),
+      );
+    }
+
     return { success: true };
   }
 

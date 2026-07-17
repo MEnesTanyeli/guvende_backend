@@ -32,4 +32,13 @@ export class RecordLocationDto {
   @IsString()
   @IsOptional()
   recordedAt?: string;
+
+  @IsString()
+  @IsOptional()
+  insideZoneId?: string;
+
+  @IsString()
+  @IsOptional()
+  insideZoneName?: string;
 }
+

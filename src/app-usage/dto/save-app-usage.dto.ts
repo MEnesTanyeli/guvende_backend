@@ -1,4 +1,4 @@
-import { IsString, IsInt, IsArray, ValidateNested } from 'class-validator';
+import { IsString, IsInt, IsArray, ValidateNested, IsOptional } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class AppUsageItemDto {
@@ -17,4 +17,8 @@ export class SaveAppUsageDto {
   @ValidateNested({ each: true })
   @Type(() => AppUsageItemDto)
   usages!: AppUsageItemDto[];
+
+  @IsString()
+  @IsOptional()
+  recordedDate?: string;
 }

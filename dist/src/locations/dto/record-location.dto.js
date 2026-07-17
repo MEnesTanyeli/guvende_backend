@@ -20,6 +20,8 @@ class RecordLocationDto {
     isCharging;
     connectionStatus;
     recordedAt;
+    insideZoneId;
+    insideZoneName;
 }
 exports.RecordLocationDto = RecordLocationDto;
 __decorate([
@@ -62,4 +64,14 @@ __decorate([
     (0, class_validator_1.IsOptional)(),
     __metadata("design:type", String)
 ], RecordLocationDto.prototype, "recordedAt", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsOptional)(),
+    __metadata("design:type", String)
+], RecordLocationDto.prototype, "insideZoneId", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsOptional)(),
+    __metadata("design:type", String)
+], RecordLocationDto.prototype, "insideZoneName", void 0);
 //# sourceMappingURL=record-location.dto.js.map

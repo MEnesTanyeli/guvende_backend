@@ -44,6 +44,9 @@ let LocationsService = class LocationsService {
         if (!user) {
             throw new common_1.NotFoundException('Kullanıcı bulunamadı.');
         }
+        const isStale = dto.recordedAt
+            ? Date.now() - new Date(dto.recordedAt).getTime() > 5 * 60 * 1000
+            : false;
         const prevLocation = await this.prisma.location.findFirst({
             where: { userId },
             orderBy: { recordedAt: 'desc' },
@@ -90,30 +93,72 @@ let LocationsService = class LocationsService {
             const safeZones = await this.prisma.safeZone.findMany({
                 where: { familyId },
             });
-            let insideZoneName = null;
-            for (const zone of safeZones) {
-                const newDist = this.getDistanceInMeters(dto.latitude, dto.longitude, zone.latitude, zone.longitude);
-                if (newDist <= zone.radius) {
-                    insideZoneName = zone.name;
+            let insideZoneName = dto.insideZoneName || null;
+            let insideZoneId = dto.insideZoneId || null;
+            if (!insideZoneName && safeZones.length > 0) {
+                for (const zone of safeZones) {
+                    const newDist = this.getDistanceInMeters(dto.latitude, dto.longitude, zone.latitude, zone.longitude);
+                    if (newDist <= zone.radius) {
+                        insideZoneName = zone.name;
+                        insideZoneId = zone.id;
+                        break;
+                    }
                 }
-                if (prevLocation) {
+            }
+            let prevZoneId = null;
+            if (prevLocation && safeZones.length > 0) {
+                for (const zone of safeZones) {
                     const prevDist = this.getDistanceInMeters(prevLocation.latitude, prevLocation.longitude, zone.latitude, zone.longitude);
-                    if (newDist <= zone.radius && prevDist > zone.radius) {
-                        const alertTitle = 'Güvenli Bölgeye Giriş';
-                        const alertMsg = `${user.name}, "${zone.name}" güvenli bölgesine giriş yaptı.`;
-                        await this.prisma.alert.create({
-                            data: {
-                                familyId,
-                                userId,
-                                type: client_1.AlertType.safe_zone_enter,
-                                title: alertTitle,
-                                message: alertMsg,
-                                metadata: { safeZoneId: zone.id, safeZoneName: zone.name },
-                            },
-                        });
+                    if (prevDist <= zone.radius) {
+                        prevZoneId = zone.id;
+                        break;
+                    }
+                }
+            }
+            let alertTriggered = false;
+            if (insideZoneId && prevZoneId !== insideZoneId) {
+                const zone = safeZones.find((z) => z.id === insideZoneId);
+                if (zone) {
+                    const alertTitle = 'Güvenli Bölgeye Giriş';
+                    const alertMsg = `${user.name}, "${zone.name}" güvenli bölgesine giriş yaptı.`;
+                    await this.prisma.alert.create({
+                        data: {
+                            familyId,
+                            userId,
+                            type: client_1.AlertType.safe_zone_enter,
+                            title: alertTitle,
+                            message: alertMsg,
+                            metadata: { safeZoneId: zone.id, safeZoneName: zone.name },
+                        },
+                    });
+                    alertTriggered = true;
+                    if (!isStale) {
                         await this.notificationsService.sendFamilyNotification(familyId, userId, alertTitle, alertMsg, { type: 'safe_zone_enter', userId, zoneId: zone.id });
                     }
-                    if (newDist > zone.radius && prevDist <= zone.radius) {
+                }
+            }
+            if (prevZoneId && insideZoneId !== prevZoneId) {
+                const zone = safeZones.find((z) => z.id === prevZoneId);
+                if (zone) {
+                    let confirmExit = true;
+                    if (!isStale) {
+                        const recentLocations = await this.prisma.location.findMany({
+                            where: { userId },
+                            orderBy: { recordedAt: 'desc' },
+                            take: 3,
+                        });
+                        if (recentLocations.length >= 3) {
+                            const insidePoints = recentLocations.filter((loc) => {
+                                const dist = this.getDistanceInMeters(loc.latitude, loc.longitude, zone.latitude, zone.longitude);
+                                return dist <= zone.radius;
+                            });
+                            if (insidePoints.length > 0) {
+                                confirmExit = false;
+                                this.logger.log(`Geofence çıkışı doğrulanmadı (Drift Guard). Son 3 konumdan ${insidePoints.length} tanesi hala bölge içinde.`);
+                            }
+                        }
+                    }
+                    if (confirmExit) {
                         const alertTitle = 'Güvenli Bölgeden Çıkış';
                         const alertMsg = `${user.name}, "${zone.name}" güvenli bölgesinden çıkış yaptı!`;
                         await this.prisma.alert.create({
@@ -126,7 +171,60 @@ let LocationsService = class LocationsService {
                                 metadata: { safeZoneId: zone.id, safeZoneName: zone.name },
                             },
                         });
-                        await this.notificationsService.sendFamilyNotification(familyId, userId, alertTitle, alertMsg, { type: 'safe_zone_exit', userId, zoneId: zone.id });
+                        alertTriggered = true;
+                        if (!isStale) {
+                            await this.notificationsService.sendFamilyNotification(familyId, userId, alertTitle, alertMsg, { type: 'safe_zone_exit', userId, zoneId: zone.id });
+                        }
+                    }
+                }
+            }
+            if (!isStale && !alertTriggered) {
+                const lastGeofenceAlert = await this.prisma.alert.findFirst({
+                    where: {
+                        userId,
+                        familyId,
+                        type: { in: [client_1.AlertType.safe_zone_enter, client_1.AlertType.safe_zone_exit] },
+                    },
+                    orderBy: { createdAt: 'desc' },
+                });
+                if (lastGeofenceAlert?.type === client_1.AlertType.safe_zone_enter && !insideZoneId) {
+                    const lastZoneName = lastGeofenceAlert.metadata
+                        ? lastGeofenceAlert.metadata.safeZoneName
+                        : 'Güvenli Bölge';
+                    const lastZoneId = lastGeofenceAlert.metadata
+                        ? lastGeofenceAlert.metadata.safeZoneId
+                        : null;
+                    const alertTitle = 'Güvenli Bölgeden Çıkış';
+                    const alertMsg = `${user.name}, "${lastZoneName}" güvenli bölgesinden çıkış yaptı!`;
+                    await this.prisma.alert.create({
+                        data: {
+                            familyId,
+                            userId,
+                            type: client_1.AlertType.safe_zone_exit,
+                            title: alertTitle,
+                            message: alertMsg,
+                            metadata: { safeZoneId: lastZoneId, safeZoneName: lastZoneName, delayedTrigger: true },
+                        },
+                    });
+                    await this.notificationsService.sendFamilyNotification(familyId, userId, alertTitle, alertMsg, { type: 'safe_zone_exit', userId, zoneId: lastZoneId });
+                }
+                else if ((!lastGeofenceAlert || lastGeofenceAlert.type === client_1.AlertType.safe_zone_exit) &&
+                    insideZoneId) {
+                    const zone = safeZones.find((z) => z.id === insideZoneId);
+                    if (zone) {
+                        const alertTitle = 'Güvenli Bölgeye Giriş';
+                        const alertMsg = `${user.name}, "${zone.name}" güvenli bölgesine giriş yaptı.`;
+                        await this.prisma.alert.create({
+                            data: {
+                                familyId,
+                                userId,
+                                type: client_1.AlertType.safe_zone_enter,
+                                title: alertTitle,
+                                message: alertMsg,
+                                metadata: { safeZoneId: zone.id, safeZoneName: zone.name, delayedTrigger: true },
+                            },
+                        });
+                        await this.notificationsService.sendFamilyNotification(familyId, userId, alertTitle, alertMsg, { type: 'safe_zone_enter', userId, zoneId: zone.id });
                     }
                 }
             }
@@ -159,7 +257,9 @@ let LocationsService = class LocationsService {
                                 metadata: { batteryLevel: dto.batteryLevel },
                             },
                         });
-                        await this.notificationsService.sendFamilyNotification(membership.familyId, userId, alertTitle, alertMsg, { type: 'low_battery', userId, batteryLevel: dto.batteryLevel });
+                        if (!isStale) {
+                            await this.notificationsService.sendFamilyNotification(membership.familyId, userId, alertTitle, alertMsg, { type: 'low_battery', userId, batteryLevel: dto.batteryLevel });
+                        }
                     }
                 }
             }

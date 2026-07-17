@@ -12,7 +12,7 @@ export class AppUsageController {
 
   @Post()
   async saveAppUsage(@GetUser('id') userId: string, @Body() dto: SaveAppUsageDto) {
-    return this.appUsageService.saveAppUsage(userId, dto.usages);
+    return this.appUsageService.saveAppUsage(userId, dto.usages, dto.recordedDate);
   }
 
   @Get('member/:memberId')

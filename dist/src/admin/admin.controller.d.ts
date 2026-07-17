@@ -269,20 +269,7 @@ export declare class AdminController {
         resolvedAt: Date | null;
     }>;
     auditLogs(query: AdminQueryDto): Promise<{
-        items: ({
-            admin: {
-                id: string;
-                email: string;
-                name: string;
-            };
-        } & {
-            id: string;
-            createdAt: Date;
-            action: string;
-            targetId: string;
-            details: import("@prisma/client/runtime/library").JsonValue;
-            adminId: string;
-        })[];
+        items: unknown[];
         total: number;
         page: number;
         limit: number;

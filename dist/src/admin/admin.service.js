@@ -62,8 +62,12 @@ let AdminService = class AdminService {
                 { phone: { contains: query.search, mode: 'insensitive' } },
             ];
         }
-        if (query.role)
+        if (query.role) {
             where.role = query.role;
+        }
+        else {
+            where.role = { not: 'admin' };
+        }
         if (query.subscription === 'premium') {
             where.isPremium = true;
             where.premiumExpiresAt = { gt: now };
@@ -199,6 +203,12 @@ let AdminService = class AdminService {
         const userBefore = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: true, isPremium: true } });
         if (!userBefore)
             throw new common_1.NotFoundException('Kullanıcı bulunamadı.');
+        if (userBefore.role === 'admin' && dto.role && dto.role !== 'admin') {
+            throw new common_1.BadRequestException('Diğer yöneticilerin yetkilerini değiştiremezsiniz.');
+        }
+        if (dto.role === 'admin' && userBefore.role !== 'admin') {
+            throw new common_1.BadRequestException('Bu panelden yeni yönetici atayamazsınız.');
+        }
         const user = await this.prisma.user.update({
             where: { id: userId },
             data: {
@@ -222,9 +232,11 @@ let AdminService = class AdminService {
     async deleteUser(adminId, userId) {
         if (adminId === userId)
             throw new common_1.BadRequestException('Kendi yönetici hesabınızı silemezsiniz.');
-        const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true, email: true } });
+        const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true, email: true, role: true } });
         if (!user)
             throw new common_1.NotFoundException('Kullanıcı bulunamadı.');
+        if (user.role === 'admin')
+            throw new common_1.BadRequestException('Yönetici hesaplarını bu panelden silemezsiniz.');
         await this.prisma.user.delete({ where: { id: userId } });
         await this.logAction(adminId, 'USER_DELETE', userId, { name: user.name, email: user.email });
         return { success: true };

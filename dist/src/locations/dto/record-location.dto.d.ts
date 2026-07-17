@@ -7,4 +7,6 @@ export declare class RecordLocationDto {
     isCharging?: boolean;
     connectionStatus?: string;
     recordedAt?: string;
+    insideZoneId?: string;
+    insideZoneName?: string;
 }
