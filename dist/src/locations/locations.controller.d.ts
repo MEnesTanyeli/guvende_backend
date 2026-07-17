@@ -1,5 +1,6 @@
 import { LocationsService } from './locations.service';
 import { RecordLocationDto } from './dto/record-location.dto';
+import { RecordBulkLocationsDto } from './dto/record-bulk-locations.dto';
 export declare class LocationsController {
     private locationsService;
     constructor(locationsService: LocationsService);
@@ -20,6 +21,32 @@ export declare class LocationsController {
         isCharging: boolean | null;
         connectionStatus: string;
         recordedAt: Date;
+    }>;
+    recordBulkLocations(userId: string, dto: RecordBulkLocationsDto): Promise<{
+        success: boolean;
+        count: number;
+        latestLocation?: undefined;
+    } | {
+        success: boolean;
+        count: number;
+        latestLocation: {
+            user: {
+                id: string;
+                email: string;
+                name: string;
+            };
+        } & {
+            id: string;
+            userId: string;
+            latitude: number;
+            longitude: number;
+            accuracy: number | null;
+            speed: number | null;
+            batteryLevel: number | null;
+            isCharging: boolean | null;
+            connectionStatus: string;
+            recordedAt: Date;
+        };
     }>;
     getLatestLocations(userId: string, familyId: string): Promise<{
         insideZoneName: string | null;

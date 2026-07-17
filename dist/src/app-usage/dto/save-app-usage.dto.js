@@ -32,6 +32,7 @@ __decorate([
 ], AppUsageItemDto.prototype, "durationMin", void 0);
 class SaveAppUsageDto {
     usages;
+    recordedDate;
 }
 exports.SaveAppUsageDto = SaveAppUsageDto;
 __decorate([
@@ -40,4 +41,9 @@ __decorate([
     (0, class_transformer_1.Type)(() => AppUsageItemDto),
     __metadata("design:type", Array)
 ], SaveAppUsageDto.prototype, "usages", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsOptional)(),
+    __metadata("design:type", String)
+], SaveAppUsageDto.prototype, "recordedDate", void 0);
 //# sourceMappingURL=save-app-usage.dto.js.map

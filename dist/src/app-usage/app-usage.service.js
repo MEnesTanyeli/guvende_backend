@@ -32,34 +32,55 @@ let AppUsageService = class AppUsageService {
         });
         return !!common;
     }
-    async saveAppUsage(userId, usages) {
-        const startOfToday = new Date();
+    async saveAppUsage(userId, usages, recordedDateStr) {
+        const startOfToday = recordedDateStr ? new Date(recordedDateStr) : new Date();
         startOfToday.setHours(0, 0, 0, 0);
-        const promises = usages.map((usage) => {
-            return this.prisma.appUsage.upsert({
-                where: {
-                    userId_packageName_recordedDate: {
-                        userId,
-                        packageName: usage.packageName,
-                        recordedDate: startOfToday,
-                    },
-                },
-                update: {
-                    durationMin: usage.durationMin,
-                    appName: usage.appName,
-                    lastUsedAt: new Date(),
-                },
-                create: {
+        const existingUsages = await this.prisma.appUsage.findMany({
+            where: {
+                userId,
+                recordedDate: startOfToday,
+            },
+        });
+        const existingMap = new Map(existingUsages.map((u) => [u.packageName, u]));
+        const toCreate = [];
+        const toUpdate = [];
+        for (const usage of usages) {
+            const existing = existingMap.get(usage.packageName);
+            if (existing) {
+                if (existing.durationMin !== usage.durationMin) {
+                    toUpdate.push({
+                        id: existing.id,
+                        durationMin: usage.durationMin,
+                        appName: usage.appName,
+                    });
+                }
+            }
+            else {
+                toCreate.push({
                     userId,
                     packageName: usage.packageName,
                     appName: usage.appName,
                     durationMin: usage.durationMin,
                     recordedDate: startOfToday,
                     lastUsedAt: new Date(),
-                },
+                });
+            }
+        }
+        if (toCreate.length > 0) {
+            await this.prisma.appUsage.createMany({
+                data: toCreate,
             });
-        });
-        await Promise.all(promises);
+        }
+        if (toUpdate.length > 0) {
+            await Promise.all(toUpdate.map((u) => this.prisma.appUsage.update({
+                where: { id: u.id },
+                data: {
+                    durationMin: u.durationMin,
+                    appName: u.appName,
+                    lastUsedAt: new Date(),
+                },
+            })));
+        }
         return { success: true };
     }
     async getMemberAppUsage(userId, targetUserId) {

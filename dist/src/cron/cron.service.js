@@ -174,32 +174,42 @@ let CronService = class CronService {
     }
     async handleMedicationReminderCheck() {
         this.logger.log('İlaç hatırlatıcı kontrolü zamanlanmış görevi başlatılıyor...');
-        const localTime = new Date().toLocaleTimeString('tr-TR', {
-            hour12: false,
-            hour: '2-digit',
-            minute: '2-digit',
-            timeZone: 'Europe/Istanbul',
-        });
         const activeReminders = await this.prisma.medicationReminder.findMany({
             where: {
-                time: localTime,
                 isActive: true,
             },
             include: {
-                user: true,
+                user: {
+                    select: {
+                        id: true,
+                        name: true,
+                        devicePermissions: true,
+                    },
+                },
             },
         });
-        const nowInIstanbul = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Istanbul' }));
-        const today = new Date(nowInIstanbul.getFullYear(), nowInIstanbul.getMonth(), nowInIstanbul.getDate());
         const filteredReminders = activeReminders.filter((reminder) => {
+            const permissions = reminder.user.devicePermissions;
+            const userTimezone = permissions?.timezone || 'Europe/Istanbul';
+            const userLocalTime = new Date().toLocaleTimeString('tr-TR', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                timeZone: userTimezone,
+            });
+            if (reminder.time !== userLocalTime) {
+                return false;
+            }
+            const nowInUserTimezone = new Date(new Date().toLocaleString('en-US', { timeZone: userTimezone }));
+            const todayInUserTimezone = new Date(nowInUserTimezone.getFullYear(), nowInUserTimezone.getMonth(), nowInUserTimezone.getDate());
             const start = new Date(reminder.startDate);
             const startDateOnly = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-            if (startDateOnly > today) {
+            if (startDateOnly > todayInUserTimezone) {
                 return false;
             }
             if (reminder.repeatDays && reminder.repeatDays > 0) {
                 const msPerDay = 24 * 60 * 60 * 1000;
-                const diffDays = Math.round((today.getTime() - startDateOnly.getTime()) / msPerDay);
+                const diffDays = Math.round((todayInUserTimezone.getTime() - startDateOnly.getTime()) / msPerDay);
                 if (diffDays >= reminder.repeatDays) {
                     return false;
                 }
@@ -207,7 +217,7 @@ let CronService = class CronService {
             return true;
         });
         if (filteredReminders.length > 0) {
-            this.logger.log(`Saat ${localTime} için ${filteredReminders.length} adet aktif hatırlatıcı tetikleniyor.`);
+            this.logger.log(`${filteredReminders.length} adet aktif hatırlatıcı zaman dilimlerine göre tetikleniyor.`);
         }
         for (const reminder of filteredReminders) {
             const sent = this.locationsGateway.sendEventToUser(reminder.userId, 'medication_reminder_trigger', {
@@ -218,10 +228,15 @@ let CronService = class CronService {
                 reminderType: reminder.reminderType,
             });
             if (sent) {
-                this.logger.log(`Hatırlatıcı alarmı (${reminder.medicationName} - ${reminder.reminderType}) kullanıcıya (${reminder.user.name}) iletildi.`);
+                this.logger.log(`Hatırlatıcı alarmı (${reminder.medicationName}) kullanıcıya (${reminder.user.name}) canlı soket üzerinden iletildi.`);
             }
             else {
-                this.logger.warn(`Kullanıcı (${reminder.user.name}) çevrimdışı olduğu için hatırlatıcı alarmı iletilemedi.`);
+                await this.notificationsService.sendOneSignalNotification([reminder.userId], '💊 İLAÇ ALMA ZAMANI!', `Lütfen "${reminder.medicationName}" ilacınızı alın (Doz: ${reminder.dosage}).`, {
+                    action: 'play_warning_sound',
+                    medicationName: reminder.medicationName,
+                    reminderId: reminder.id,
+                });
+                this.logger.warn(`Kullanıcı (${reminder.user.name}) çevrimdışı olduğu için ilaç hatırlatıcı OneSignal Push olarak gönderildi.`);
             }
         }
     }

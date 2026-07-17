@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Post, UseGuards, Query } from '@nestjs/common';
 import { LocationsService } from './locations.service';
 import { RecordLocationDto } from './dto/record-location.dto';
+import { RecordBulkLocationsDto } from './dto/record-bulk-locations.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SubscriptionGuard } from '../auth/guards/subscription.guard';
 import { GetUser } from '../auth/decorators/get-user.decorator';
@@ -13,6 +14,11 @@ export class LocationsController {
   @Post('locations')
   async recordLocation(@GetUser('id') userId: string, @Body() dto: RecordLocationDto) {
     return this.locationsService.recordLocation(userId, dto);
+  }
+
+  @Post('locations/bulk')
+  async recordBulkLocations(@GetUser('id') userId: string, @Body() dto: RecordBulkLocationsDto) {
+    return this.locationsService.recordBulkLocations(userId, dto);
   }
 
   @Get('families/:familyId/locations/latest')

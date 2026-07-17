@@ -1,6 +1,7 @@
 import { Injectable, ForbiddenException, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RecordLocationDto } from './dto/record-location.dto';
+import { RecordBulkLocationsDto } from './dto/record-bulk-locations.dto';
 import { LocationsGateway } from './locations.gateway';
 import { AlertType, AlertStatus, MemberType } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -379,7 +380,62 @@ export class LocationsService {
     }
 
     return newLocation;
+  }
 
+  async recordBulkLocations(userId: string, dto: RecordBulkLocationsDto) {
+    const { locations } = dto;
+    if (!locations || locations.length === 0) {
+      return { success: true, count: 0 };
+    }
+
+    // 1. Konumları tarihlerine göre eskiden yeniye doğru sıralayalım
+    const sortedLocations = [...locations].sort((a, b) => {
+      const timeA = a.recordedAt ? new Date(a.recordedAt).getTime() : 0;
+      const timeB = b.recordedAt ? new Date(b.recordedAt).getTime() : 0;
+      return timeA - timeB;
+    });
+
+    // 2. En son (en güncel) konumu ayıralım, diğerlerini geçmiş veri yapalım
+    const latestLocationDto = sortedLocations[sortedLocations.length - 1];
+    const historicalLocationDtos = sortedLocations.slice(0, sortedLocations.length - 1);
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Kullanıcı bulunamadı.');
+    }
+
+    // 3. Geçmiş konumları toplu olarak veritabanına ekleyelim (Prisma createMany ile çok hızlı)
+    if (historicalLocationDtos.length > 0) {
+      const dataToInsert = historicalLocationDtos.map((loc) => ({
+        userId,
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        accuracy: loc.accuracy,
+        speed: loc.speed,
+        batteryLevel: loc.batteryLevel,
+        isCharging: loc.isCharging ?? false,
+        connectionStatus: loc.connectionStatus || 'offline',
+        recordedAt: loc.recordedAt ? new Date(loc.recordedAt) : new Date(),
+      }));
+
+      await this.prisma.location.createMany({
+        data: dataToInsert,
+      });
+    }
+
+    // 4. En güncel konumu mevcut recordLocation metoduyla işleyelim.
+    // Bu sayede en son duruma göre gerekli tüm canlı bildirim ve WebSocket işlemleri tetiklenmiş olur.
+    const savedLatestLocation = await this.recordLocation(userId, latestLocationDto);
+
+    return {
+      success: true,
+      count: locations.length,
+      latestLocation: savedLatestLocation,
+    };
   }
 
   async getLatestLocations(userId: string, familyId: string) {

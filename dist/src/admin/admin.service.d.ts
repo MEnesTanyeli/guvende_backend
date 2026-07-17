@@ -266,7 +266,20 @@ export declare class AdminService {
     private ensureUser;
     logAction(adminId: string, action: string, targetId: string, details: any): Promise<void>;
     auditLogs(query: AdminQueryDto): Promise<{
-        items: unknown[];
+        items: ({
+            admin: {
+                id: string;
+                email: string;
+                name: string;
+            };
+        } & {
+            id: string;
+            createdAt: Date;
+            action: string;
+            targetId: string;
+            details: Prisma.JsonValue;
+            adminId: string;
+        })[];
         total: number;
         page: number;
         limit: number;

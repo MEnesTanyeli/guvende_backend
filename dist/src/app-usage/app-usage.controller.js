@@ -25,7 +25,7 @@ let AppUsageController = class AppUsageController {
         this.appUsageService = appUsageService;
     }
     async saveAppUsage(userId, dto) {
-        return this.appUsageService.saveAppUsage(userId, dto.usages);
+        return this.appUsageService.saveAppUsage(userId, dto.usages, dto.recordedDate);
     }
     async getMemberAppUsage(userId, memberId) {
         return this.appUsageService.getMemberAppUsage(userId, memberId);

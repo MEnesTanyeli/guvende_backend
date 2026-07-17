@@ -19,6 +19,7 @@ let LocationsService = class LocationsService {
     prisma;
     locationsGateway;
     notificationsService;
+    logger = new common_1.Logger('LocationsService');
     constructor(prisma, locationsGateway, notificationsService) {
         this.prisma = prisma;
         this.locationsGateway = locationsGateway;
@@ -278,6 +279,48 @@ let LocationsService = class LocationsService {
             }
         }
         return newLocation;
+    }
+    async recordBulkLocations(userId, dto) {
+        const { locations } = dto;
+        if (!locations || locations.length === 0) {
+            return { success: true, count: 0 };
+        }
+        const sortedLocations = [...locations].sort((a, b) => {
+            const timeA = a.recordedAt ? new Date(a.recordedAt).getTime() : 0;
+            const timeB = b.recordedAt ? new Date(b.recordedAt).getTime() : 0;
+            return timeA - timeB;
+        });
+        const latestLocationDto = sortedLocations[sortedLocations.length - 1];
+        const historicalLocationDtos = sortedLocations.slice(0, sortedLocations.length - 1);
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: { id: true },
+        });
+        if (!user) {
+            throw new common_1.NotFoundException('Kullanıcı bulunamadı.');
+        }
+        if (historicalLocationDtos.length > 0) {
+            const dataToInsert = historicalLocationDtos.map((loc) => ({
+                userId,
+                latitude: loc.latitude,
+                longitude: loc.longitude,
+                accuracy: loc.accuracy,
+                speed: loc.speed,
+                batteryLevel: loc.batteryLevel,
+                isCharging: loc.isCharging ?? false,
+                connectionStatus: loc.connectionStatus || 'offline',
+                recordedAt: loc.recordedAt ? new Date(loc.recordedAt) : new Date(),
+            }));
+            await this.prisma.location.createMany({
+                data: dataToInsert,
+            });
+        }
+        const savedLatestLocation = await this.recordLocation(userId, latestLocationDto);
+        return {
+            success: true,
+            count: locations.length,
+            latestLocation: savedLatestLocation,
+        };
     }
     async getLatestLocations(userId, familyId) {
         const isMember = await this.prisma.familyMember.findUnique({

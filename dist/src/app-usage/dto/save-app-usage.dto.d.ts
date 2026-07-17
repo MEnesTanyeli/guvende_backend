@@ -5,4 +5,5 @@ export declare class AppUsageItemDto {
 }
 export declare class SaveAppUsageDto {
     usages: AppUsageItemDto[];
+    recordedDate?: string;
 }

@@ -1,11 +1,13 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { RecordLocationDto } from './dto/record-location.dto';
+import { RecordBulkLocationsDto } from './dto/record-bulk-locations.dto';
 import { LocationsGateway } from './locations.gateway';
 import { NotificationsService } from '../notifications/notifications.service';
 export declare class LocationsService {
     private prisma;
     private locationsGateway;
     private notificationsService;
+    private readonly logger;
     constructor(prisma: PrismaService, locationsGateway: LocationsGateway, notificationsService: NotificationsService);
     private getDistanceInMeters;
     recordLocation(userId: string, dto: RecordLocationDto): Promise<{
@@ -25,6 +27,32 @@ export declare class LocationsService {
         isCharging: boolean | null;
         connectionStatus: string;
         recordedAt: Date;
+    }>;
+    recordBulkLocations(userId: string, dto: RecordBulkLocationsDto): Promise<{
+        success: boolean;
+        count: number;
+        latestLocation?: undefined;
+    } | {
+        success: boolean;
+        count: number;
+        latestLocation: {
+            user: {
+                id: string;
+                email: string;
+                name: string;
+            };
+        } & {
+            id: string;
+            userId: string;
+            latitude: number;
+            longitude: number;
+            accuracy: number | null;
+            speed: number | null;
+            batteryLevel: number | null;
+            isCharging: boolean | null;
+            connectionStatus: string;
+            recordedAt: Date;
+        };
     }>;
     getLatestLocations(userId: string, familyId: string): Promise<{
         insideZoneName: string | null;

@@ -7,7 +7,7 @@ export declare class AppUsageService {
         packageName: string;
         appName: string;
         durationMin: number;
-    }>): Promise<{
+    }>, recordedDateStr?: string): Promise<{
         success: boolean;
     }>;
     getMemberAppUsage(userId: string, targetUserId: string): Promise<{

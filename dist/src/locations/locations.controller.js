@@ -16,6 +16,7 @@ exports.LocationsController = void 0;
 const common_1 = require("@nestjs/common");
 const locations_service_1 = require("./locations.service");
 const record_location_dto_1 = require("./dto/record-location.dto");
+const record_bulk_locations_dto_1 = require("./dto/record-bulk-locations.dto");
 const jwt_auth_guard_1 = require("../auth/guards/jwt-auth.guard");
 const subscription_guard_1 = require("../auth/guards/subscription.guard");
 const get_user_decorator_1 = require("../auth/decorators/get-user.decorator");
@@ -26,6 +27,9 @@ let LocationsController = class LocationsController {
     }
     async recordLocation(userId, dto) {
         return this.locationsService.recordLocation(userId, dto);
+    }
+    async recordBulkLocations(userId, dto) {
+        return this.locationsService.recordBulkLocations(userId, dto);
     }
     async getLatestLocations(userId, familyId) {
         return this.locationsService.getLatestLocations(userId, familyId);
@@ -52,6 +56,14 @@ __decorate([
     __metadata("design:paramtypes", [String, record_location_dto_1.RecordLocationDto]),
     __metadata("design:returntype", Promise)
 ], LocationsController.prototype, "recordLocation", null);
+__decorate([
+    (0, common_1.Post)('locations/bulk'),
+    __param(0, (0, get_user_decorator_1.GetUser)('id')),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, record_bulk_locations_dto_1.RecordBulkLocationsDto]),
+    __metadata("design:returntype", Promise)
+], LocationsController.prototype, "recordBulkLocations", null);
 __decorate([
     (0, common_1.Get)('families/:familyId/locations/latest'),
     __param(0, (0, get_user_decorator_1.GetUser)('id')),
