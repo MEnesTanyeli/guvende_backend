@@ -490,6 +490,67 @@ export class LocationsGateway
     }
   }
 
+  @SubscribeMessage('video_call_request')
+  async handleVideoCallRequest(
+    @MessageBody() data: { targetUserId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    const callerId = client.data.userId;
+    if (!callerId) return { status: 'error', message: 'Yetkisiz.' };
+
+    const caller = await this.prisma.user.findUnique({
+      where: { id: callerId },
+      select: { name: true },
+    });
+
+    const sent = this.sendEventToUser(data.targetUserId, 'video_call_invite', {
+      callerId,
+      callerName: caller?.name || 'Veli',
+    });
+
+    if (!sent) {
+      // Çocuğun interneti/soketi kapalıysa OneSignal Push Bildirimi atarak telefonu uyandıralım
+      await this.sendPushNotification(
+        [data.targetUserId],
+        '📞 GÖRÜNTÜLÜ ARAMA ÇAĞRISI',
+        `${caller?.name || 'Veliniz'} görüntülü arama başlatmak istiyor.`,
+        { action: 'incoming_video_call', callerId },
+      );
+    }
+
+    return { status: 'success' };
+  }
+
+  @SubscribeMessage('video_call_response')
+  handleVideoCallResponse(
+    @MessageBody() data: { targetUserId: string; accepted: boolean },
+    @ConnectedSocket() client: Socket,
+  ) {
+    const responderId = client.data.userId;
+    if (!responderId) return { status: 'error', message: 'Yetkisiz.' };
+
+    this.sendEventToUser(data.targetUserId, 'video_call_response', {
+      responderId,
+      accepted: data.accepted,
+    });
+    return { status: 'success' };
+  }
+
+  @SubscribeMessage('webrtc_signal')
+  handleWebRTCSignal(
+    @MessageBody() data: { targetUserId: string; signal: any },
+    @ConnectedSocket() client: Socket,
+  ) {
+    const senderId = client.data.userId;
+    if (!senderId) return { status: 'error', message: 'Yetkisiz.' };
+
+    this.sendEventToUser(data.targetUserId, 'webrtc_signal', {
+      senderId,
+      signal: data.signal,
+    });
+    return { status: 'success' };
+  }
+
   // Belirli bir kullanıcının tüm aktif soketlerine event gönderir
   sendEventToUser(userId: string, event: string, data: any): boolean {
     const sockets = this.activeUsers.get(userId);
