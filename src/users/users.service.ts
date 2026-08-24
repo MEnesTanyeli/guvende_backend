@@ -102,6 +102,21 @@ export class UsersService {
     return this.findOne(id);
   }
 
+  async purchasePremiumMock(userId: string) {
+    const premiumExpiresAt = new Date();
+    premiumExpiresAt.setFullYear(premiumExpiresAt.getFullYear() + 1);
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        isPremium: true,
+        premiumExpiresAt,
+      },
+    });
+
+    return this.findOne(userId);
+  }
+
   async setProxy(userId: string, email: string) {
     const targetUser = await this.prisma.user.findUnique({
       where: { email: email.toLowerCase() },
