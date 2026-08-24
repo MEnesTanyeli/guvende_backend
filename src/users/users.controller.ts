@@ -33,6 +33,10 @@ export class UsersController {
     return this.usersService.updateProfile(userId, dto.name, dto.phone, dto.gender);
   }
 
+  @Post('purchase-mock')
+  async purchasePremiumMock(@GetUser('id') userId: string) {
+    return this.usersService.purchasePremiumMock(userId);
+  }
   @Post('proxy')
   async setProxy(@GetUser('id') userId: string, @Body() body: { email: string }) {
     return this.usersService.setProxy(userId, body.email);
