@@ -1,9 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { AlertStatus, AlertType } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 import { LocationsGateway } from '../locations/locations.gateway';
+
+interface DevicePermissions {
+  timezone?: string;
+}
 
 @Injectable()
 export class CronService {
@@ -14,6 +18,10 @@ export class CronService {
     private notificationsService: NotificationsService,
     private locationsGateway: LocationsGateway,
   ) {}
+
+  private getErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
 
   // Mesafe hesabı için Haversine Formülü
   private getDistanceInMeters(
@@ -262,8 +270,9 @@ export class CronService {
 
     const filteredReminders = activeReminders.filter((reminder) => {
       // Kullanıcının saat dilimi bilgisini al, yoksa varsayılan Türkiye saatini kullan
-      const permissions = reminder.user.devicePermissions as any;
-      const userTimezone = permissions?.timezone || 'Europe/Istanbul';
+      const permissions = reminder.user
+        .devicePermissions as DevicePermissions | null;
+      const userTimezone = permissions?.timezone ?? 'Europe/Istanbul';
 
       // 1. Saat kontrolü (Kullanıcının yerel saatine göre)
       const userLocalTime = new Date().toLocaleTimeString('tr-TR', {
@@ -425,7 +434,7 @@ export class CronService {
       );
     } catch (error) {
       this.logger.error(
-        `Eski konum kayıtları temizlenirken hata oluştu: ${error.message}`,
+        `Eski konum kayıtları temizlenirken hata oluştu: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -444,7 +453,7 @@ export class CronService {
       );
     } catch (error) {
       this.logger.error(
-        `Eski session kayıtları temizlenirken hata oluştu: ${error.message}`,
+        `Eski session kayıtları temizlenirken hata oluştu: ${this.getErrorMessage(error)}`,
       );
     }
   }

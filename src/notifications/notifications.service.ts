@@ -1,7 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
+import * as https from 'https';
 import { PrismaService } from '../prisma/prisma.service';
 import { LocationsGateway } from '../locations/locations.gateway';
-import * as https from 'https';
+
+interface OneSignalPayload {
+  app_id: string;
+  include_external_user_ids: string[];
+  headings: { tr: string; en: string };
+  contents: { tr: string; en: string };
+  data: Record<string, unknown>;
+  buttons?: Array<{ id: string; text: string; icon: string }>;
+  android_ongoing?: boolean;
+}
 
 @Injectable()
 export class NotificationsService {
@@ -12,12 +22,19 @@ export class NotificationsService {
     private locationsGateway: LocationsGateway,
   ) {}
 
-  async sendOneSignalNotification(userIds: string[], title: string, message: string, data?: any) {
+  async sendOneSignalNotification(
+    userIds: string[],
+    title: string,
+    message: string,
+    data?: Record<string, unknown>,
+  ) {
     const appId = process.env.ONESIGNAL_APP_ID;
     const apiKey = process.env.ONESIGNAL_REST_API_KEY;
 
     if (!appId || !apiKey) {
-      this.logger.warn('OneSignal App ID veya REST API Key eksik. Push bildirim gönderilemedi.');
+      this.logger.warn(
+        'OneSignal App ID veya REST API Key eksik. Push bildirim gönderilemedi.',
+      );
       return;
     }
 
@@ -25,18 +42,16 @@ export class NotificationsService {
       return;
     }
 
-    const payload: any = {
+    const payload: OneSignalPayload = {
       app_id: appId,
       include_external_user_ids: userIds,
       headings: { tr: title, en: title },
       contents: { tr: message, en: message },
-      data: data || {},
+      data: data ?? {},
     };
 
-    if (data && data.action === 'play_warning_sound') {
-      payload.buttons = [
-        { id: 'mute_warning', text: 'Sustur', icon: '' }
-      ];
+    if (data?.action === 'play_warning_sound') {
+      payload.buttons = [{ id: 'mute_warning', text: 'Sustur', icon: '' }];
       payload.android_ongoing = true;
     }
 
@@ -49,7 +64,7 @@ export class NotificationsService {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json; charset=utf-8',
-        'Authorization': `Basic ${apiKey}`,
+        Authorization: `Basic ${apiKey}`,
         'Content-Length': Buffer.byteLength(payloadStr),
       },
     };
@@ -61,7 +76,9 @@ export class NotificationsService {
           responseBody += chunk;
         });
         res.on('end', () => {
-          this.logger.log(`OneSignal Push Gönderim Sonucu: ${res.statusCode} | Gövde: ${responseBody}`);
+          this.logger.log(
+            `OneSignal Push Gönderim Sonucu: ${res.statusCode} | Gövde: ${responseBody}`,
+          );
           resolve({ statusCode: res.statusCode, body: responseBody });
         });
       });
@@ -76,7 +93,12 @@ export class NotificationsService {
     });
   }
 
-  async sendNotification(userId: string, title: string, message: string, data?: any) {
+  async sendNotification(
+    userId: string,
+    title: string,
+    message: string,
+    data?: Record<string, unknown>,
+  ) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { name: true, email: true },
@@ -87,14 +109,20 @@ export class NotificationsService {
     // FCM Simülasyonu - Konsola log olarak yazılır
     this.logger.log(
       `[FCM SIMULASYONU] Bildirim Gönderilen Kullanıcı: ${userName} (${userId}) | Başlık: "${title}" | Mesaj: "${message}" | Ek Veri: ${JSON.stringify(
-        data || {},
+        data ?? {},
       )}`,
     );
 
     return { success: true, userId, title, message };
   }
 
-  async sendFamilyNotification(familyId: string, senderId: string, title: string, message: string, data?: any) {
+  async sendFamilyNotification(
+    familyId: string,
+    senderId: string,
+    title: string,
+    message: string,
+    data?: Record<string, unknown>,
+  ) {
     // Gönderenin rolünü sorgula
     const sender = await this.prisma.familyMember.findUnique({
       where: {
@@ -127,13 +155,13 @@ export class NotificationsService {
     );
 
     // Canlı soket bildirimi yayınla (Gönderici rolünü de iletiyoruz)
-    this.locationsGateway.sendAlertNotification(familyId, {
+    await this.locationsGateway.sendAlertNotification(familyId, {
       title,
       message,
       senderId,
       senderRole: sender?.memberType,
       data: {
-        ...data,
+        ...(data ?? {}),
         familyId,
       },
       createdAt: new Date(),
@@ -141,7 +169,7 @@ export class NotificationsService {
 
     let targetUserIds = members.map((member) => member.userId);
     if (senderId) {
-      targetUserIds = targetUserIds.filter(id => id !== senderId);
+      targetUserIds = targetUserIds.filter((id) => id !== senderId);
     }
 
     // OneSignal üzerinden tüm aile üyelerine push bildirim gönder

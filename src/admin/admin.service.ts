@@ -1,8 +1,16 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { AlertStatus, AlertType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { AdminQueryDto, AlertQueryDto, UserQueryDto } from './dto/admin-query.dto';
+import {
+  AdminQueryDto,
+  AlertQueryDto,
+  UserQueryDto,
+} from './dto/admin-query.dto';
 import { UpdateAdminUserDto } from './dto/update-user.dto';
 
 @Injectable()
@@ -16,23 +24,38 @@ export class AdminService {
     const now = new Date();
     const lastWeek = new Date(now);
     lastWeek.setDate(lastWeek.getDate() - 7);
-    const [users, families, activeAlerts, premiumUsers, recentUsers, recentSos, alertGroups] =
-      await this.prisma.$transaction([
-        this.prisma.user.count(),
-        this.prisma.family.count(),
-        this.prisma.alert.count({ where: { status: AlertStatus.active } }),
-        this.prisma.user.count({ where: { isPremium: true, premiumExpiresAt: { gt: now } } }),
-        this.prisma.user.findMany({
-          take: 5,
-          orderBy: { createdAt: 'desc' },
-          select: { id: true, name: true, email: true, role: true, createdAt: true },
-        }),
-        this.prisma.sosEvent.count({ where: { createdAt: { gte: lastWeek } } }),
-        this.prisma.alert.findMany({
-          where: { createdAt: { gte: lastWeek } },
-          select: { type: true },
-        }),
-      ]);
+    const [
+      users,
+      families,
+      activeAlerts,
+      premiumUsers,
+      recentUsers,
+      recentSos,
+      alertGroups,
+    ] = await this.prisma.$transaction([
+      this.prisma.user.count(),
+      this.prisma.family.count(),
+      this.prisma.alert.count({ where: { status: AlertStatus.active } }),
+      this.prisma.user.count({
+        where: { isPremium: true, premiumExpiresAt: { gt: now } },
+      }),
+      this.prisma.user.findMany({
+        take: 5,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.sosEvent.count({ where: { createdAt: { gte: lastWeek } } }),
+      this.prisma.alert.findMany({
+        where: { createdAt: { gte: lastWeek } },
+        select: { type: true },
+      }),
+    ]);
 
     return {
       totals: { users, families, activeAlerts, premiumUsers, recentSos },
@@ -71,7 +94,15 @@ export class AdminService {
       where.NOT = { isPremium: true, premiumExpiresAt: { gt: now } };
     } else if (query.subscription === 'expired') {
       where.trialEndsAt = { lte: now };
-      where.AND = [{ OR: [{ isPremium: false }, { premiumExpiresAt: null }, { premiumExpiresAt: { lte: now } }] }];
+      where.AND = [
+        {
+          OR: [
+            { isPremium: false },
+            { premiumExpiresAt: null },
+            { premiumExpiresAt: { lte: now } },
+          ],
+        },
+      ];
     }
 
     const [items, total] = await this.prisma.$transaction([
@@ -81,8 +112,15 @@ export class AdminService {
         take: query.limit,
         orderBy: { createdAt: 'desc' },
         select: {
-          id: true, name: true, email: true, phone: true, role: true, isPremium: true,
-          premiumExpiresAt: true, trialEndsAt: true, createdAt: true,
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          role: true,
+          isPremium: true,
+          premiumExpiresAt: true,
+          trialEndsAt: true,
+          createdAt: true,
           _count: { select: { memberships: true, alerts: true } },
         },
       }),
@@ -171,7 +209,9 @@ export class AdminService {
       },
     });
 
-    await this.logAction(adminId, 'LOCATION_HISTORY_VIEW', userId, { date: dateStr || new Date().toISOString().split('T')[0] });
+    await this.logAction(adminId, 'LOCATION_HISTORY_VIEW', userId, {
+      date: dateStr || new Date().toISOString().split('T')[0],
+    });
 
     return history;
   }
@@ -179,12 +219,12 @@ export class AdminService {
   async latestLocations() {
     const childAndElderUsers = await this.prisma.user.findMany({
       where: {
-        role: { in: ['child', 'elder'] }
+        role: { in: ['child', 'elder'] },
       },
-      select: { id: true, name: true, email: true, role: true }
+      select: { id: true, name: true, email: true, role: true },
     });
 
-    const userIds = childAndElderUsers.map(u => u.id);
+    const userIds = childAndElderUsers.map((u) => u.id);
 
     const locations = await Promise.all(
       userIds.map(async (uid) => {
@@ -193,12 +233,12 @@ export class AdminService {
           orderBy: { recordedAt: 'desc' },
           include: {
             user: {
-              select: { id: true, name: true, email: true, role: true }
-            }
-          }
+              select: { id: true, name: true, email: true, role: true },
+            },
+          },
         });
         return loc;
-      })
+      }),
     );
 
     return locations.filter(Boolean);
@@ -206,13 +246,20 @@ export class AdminService {
 
   async updateUser(adminId: string, userId: string, dto: UpdateAdminUserDto) {
     if (adminId === userId && dto.role && dto.role !== 'admin') {
-      throw new BadRequestException('Kendi yönetici yetkinizi kaldıramazsınız.');
+      throw new BadRequestException(
+        'Kendi yönetici yetkinizi kaldıramazsınız.',
+      );
     }
-    const userBefore = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: true, isPremium: true } });
+    const userBefore = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true, isPremium: true },
+    });
     if (!userBefore) throw new NotFoundException('Kullanıcı bulunamadı.');
 
     if (userBefore.role === 'admin' && dto.role && dto.role !== 'admin') {
-      throw new BadRequestException('Diğer yöneticilerin yetkilerini değiştiremezsiniz.');
+      throw new BadRequestException(
+        'Diğer yöneticilerin yetkilerini değiştiremezsiniz.',
+      );
     }
     if (dto.role === 'admin' && userBefore.role !== 'admin') {
       throw new BadRequestException('Bu panelden yeni yönetici atayamazsınız.');
@@ -223,31 +270,54 @@ export class AdminService {
       data: {
         ...(dto.role !== undefined && { role: dto.role }),
         ...(dto.isPremium !== undefined && { isPremium: dto.isPremium }),
-        ...(dto.premiumExpiresAt !== undefined && { premiumExpiresAt: new Date(dto.premiumExpiresAt) }),
+        ...(dto.premiumExpiresAt !== undefined && {
+          premiumExpiresAt: new Date(dto.premiumExpiresAt),
+        }),
       },
       select: {
-        id: true, name: true, email: true, role: true, isPremium: true,
-        premiumExpiresAt: true, trialEndsAt: true,
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        isPremium: true,
+        premiumExpiresAt: true,
+        trialEndsAt: true,
       },
     });
 
     if (dto.role !== undefined && dto.role !== userBefore.role) {
-      await this.logAction(adminId, 'ROLE_CHANGE', userId, { from: userBefore.role, to: dto.role });
+      await this.logAction(adminId, 'ROLE_CHANGE', userId, {
+        from: userBefore.role,
+        to: dto.role,
+      });
     }
     if (dto.isPremium !== undefined && dto.isPremium !== userBefore.isPremium) {
-      await this.logAction(adminId, 'PREMIUM_TOGGLE', userId, { from: userBefore.isPremium, to: dto.isPremium });
+      await this.logAction(adminId, 'PREMIUM_TOGGLE', userId, {
+        from: userBefore.isPremium,
+        to: dto.isPremium,
+      });
     }
 
     return user;
   }
 
   async deleteUser(adminId: string, userId: string) {
-    if (adminId === userId) throw new BadRequestException('Kendi yönetici hesabınızı silemezsiniz.');
-    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true, email: true, role: true } });
+    if (adminId === userId)
+      throw new BadRequestException('Kendi yönetici hesabınızı silemezsiniz.');
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, name: true, email: true, role: true },
+    });
     if (!user) throw new NotFoundException('Kullanıcı bulunamadı.');
-    if (user.role === 'admin') throw new BadRequestException('Yönetici hesaplarını bu panelden silemezsiniz.');
+    if (user.role === 'admin')
+      throw new BadRequestException(
+        'Yönetici hesaplarını bu panelden silemezsiniz.',
+      );
     await this.prisma.user.delete({ where: { id: userId } });
-    await this.logAction(adminId, 'USER_DELETE', userId, { name: user.name, email: user.email });
+    await this.logAction(adminId, 'USER_DELETE', userId, {
+      name: user.name,
+      email: user.email,
+    });
     return { success: true };
   }
 
@@ -262,13 +332,19 @@ export class AdminService {
   }
 
   async families(query: AdminQueryDto) {
-    const where: Prisma.FamilyWhereInput = query.search ? {
-      OR: [
-        { name: { contains: query.search, mode: 'insensitive' } },
-        { owner: { name: { contains: query.search, mode: 'insensitive' } } },
-        { owner: { email: { contains: query.search, mode: 'insensitive' } } },
-      ],
-    } : {};
+    const where: Prisma.FamilyWhereInput = query.search
+      ? {
+          OR: [
+            { name: { contains: query.search, mode: 'insensitive' } },
+            {
+              owner: { name: { contains: query.search, mode: 'insensitive' } },
+            },
+            {
+              owner: { email: { contains: query.search, mode: 'insensitive' } },
+            },
+          ],
+        }
+      : {};
     const [items, total] = await this.prisma.$transaction([
       this.prisma.family.findMany({
         where,
@@ -290,7 +366,19 @@ export class AdminService {
       where: { id },
       include: {
         owner: { select: { id: true, name: true, email: true, phone: true } },
-        members: { include: { user: { select: { id: true, name: true, email: true, phone: true, role: true } } } },
+        members: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                phone: true,
+                role: true,
+              },
+            },
+          },
+        },
         safeZones: true,
         alerts: { take: 20, orderBy: { createdAt: 'desc' } },
       },
@@ -300,7 +388,10 @@ export class AdminService {
   }
 
   async deleteFamily(adminId: string, id: string) {
-    const family = await this.prisma.family.findUnique({ where: { id }, select: { id: true, name: true } });
+    const family = await this.prisma.family.findUnique({
+      where: { id },
+      select: { id: true, name: true },
+    });
     if (!family) throw new NotFoundException('Aile grubu bulunamadı.');
     await this.prisma.family.delete({ where: { id } });
     await this.logAction(adminId, 'FAMILY_DELETE', id, { name: family.name });
@@ -310,7 +401,11 @@ export class AdminService {
   async alerts(query: AlertQueryDto) {
     const where: Prisma.AlertWhereInput = {};
     if (query.status) where.status = query.status;
-    if (query.type && Object.values(AlertType).includes(query.type as AlertType)) where.type = query.type as AlertType;
+    if (
+      query.type &&
+      Object.values(AlertType).includes(query.type as AlertType)
+    )
+      where.type = query.type as AlertType;
     if (query.search) {
       where.OR = [
         { title: { contains: query.search, mode: 'insensitive' } },
@@ -336,7 +431,10 @@ export class AdminService {
   }
 
   async resolveAlert(adminId: string, id: string) {
-    const alert = await this.prisma.alert.findUnique({ where: { id }, select: { id: true, type: true } });
+    const alert = await this.prisma.alert.findUnique({
+      where: { id },
+      select: { id: true, type: true },
+    });
     if (!alert) throw new NotFoundException('Alarm bulunamadı.');
     const res = await this.prisma.alert.update({
       where: { id },
@@ -347,11 +445,19 @@ export class AdminService {
   }
 
   private async ensureUser(id: string) {
-    const user = await this.prisma.user.findUnique({ where: { id }, select: { id: true } });
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: { id: true },
+    });
     if (!user) throw new NotFoundException('Kullanıcı bulunamadı.');
   }
 
-  async logAction(adminId: string, action: string, targetId: string, details: any) {
+  async logAction(
+    adminId: string,
+    action: string,
+    targetId: string,
+    details?: Prisma.InputJsonValue,
+  ) {
     try {
       await this.prisma.adminAuditLog.create({
         data: {
@@ -413,18 +519,28 @@ export class AdminService {
 
     const users = await this.prisma.user.findMany({
       where: { role: { in: roleFilter } },
-      select: { id: true }
+      select: { id: true },
     });
 
-    const userIds = users.map(u => u.id);
+    const userIds = users.map((u) => u.id);
     if (userIds.length > 0) {
-      await this.notificationsService.sendOneSignalNotification(userIds, title, message, {
-        action: 'system_broadcast',
-        sentBy: adminId
-      });
+      await this.notificationsService.sendOneSignalNotification(
+        userIds,
+        title,
+        message,
+        {
+          action: 'system_broadcast',
+          sentBy: adminId,
+        },
+      );
     }
 
-    await this.logAction(adminId, 'SYSTEM_BROADCAST', 'system', { target, title, message, userCount: userIds.length });
+    await this.logAction(adminId, 'SYSTEM_BROADCAST', 'system', {
+      target,
+      title,
+      message,
+      userCount: userIds.length,
+    });
 
     return { success: true, userCount: userIds.length };
   }
@@ -445,7 +561,9 @@ export class AdminService {
       },
     });
 
-    await this.logAction(adminId, 'USER_TODAY_LOCATIONS_DELETE', userId, { count: deleteResult.count });
+    await this.logAction(adminId, 'USER_TODAY_LOCATIONS_DELETE', userId, {
+      count: deleteResult.count,
+    });
     return { success: true, count: deleteResult.count };
   }
 
@@ -464,7 +582,9 @@ export class AdminService {
       },
     });
 
-    await this.logAction(adminId, 'ALL_TODAY_LOCATIONS_DELETE', 'system', { count: deleteResult.count });
+    await this.logAction(adminId, 'ALL_TODAY_LOCATIONS_DELETE', 'system', {
+      count: deleteResult.count,
+    });
     return { success: true, count: deleteResult.count };
   }
 

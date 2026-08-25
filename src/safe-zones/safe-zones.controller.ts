@@ -1,4 +1,12 @@
-import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { SafeZonesService } from './safe-zones.service';
 import { CreateSafeZoneDto } from './dto/create-safe-zone.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -20,7 +28,10 @@ export class SafeZonesController {
   }
 
   @Get('families/:familyId/safe-zones')
-  async findAll(@GetUser('id') userId: string, @Param('familyId') familyId: string) {
+  async findAll(
+    @GetUser('id') userId: string,
+    @Param('familyId') familyId: string,
+  ) {
     return this.safeZonesService.findAll(userId, familyId);
   }
 

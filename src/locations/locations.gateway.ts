@@ -13,6 +13,26 @@ import { PrismaService } from '../prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import * as https from 'https';
 
+interface AccessTokenPayload {
+  sub?: string;
+  sid?: string;
+  typ?: string;
+  exp?: number;
+}
+
+interface SocketAuthData {
+  userId?: string;
+  sessionId?: string;
+  authExpiryTimer?: NodeJS.Timeout;
+}
+
+type AuthenticatedSocket = Socket<
+  Record<string, unknown>,
+  Record<string, unknown>,
+  Record<string, unknown>,
+  SocketAuthData
+>;
+
 @WebSocketGateway({
   cors: {
     origin: (process.env.CORS_ORIGINS || '')
@@ -44,7 +64,7 @@ export class LocationsGateway
     userIds: string[],
     title: string,
     message: string,
-    data?: any,
+    data?: Record<string, unknown>,
   ) {
     const appId = process.env.ONESIGNAL_APP_ID;
     const apiKey = process.env.ONESIGNAL_REST_API_KEY;
@@ -109,7 +129,10 @@ export class LocationsGateway
     });
   }
 
-  async sendSilentPushNotification(userIds: string[], data: any) {
+  async sendSilentPushNotification(
+    userIds: string[],
+    data: Record<string, unknown>,
+  ) {
     const appId = process.env.ONESIGNAL_APP_ID;
     const apiKey = process.env.ONESIGNAL_REST_API_KEY;
 
@@ -172,17 +195,20 @@ export class LocationsGateway
     });
   }
 
-  async handleConnection(client: Socket) {
+  async handleConnection(client: AuthenticatedSocket) {
     try {
+      const handshakeAuth = client.handshake.auth as { token?: unknown };
+      const authToken = handshakeAuth.token;
+      const headerToken = client.handshake.headers.authorization;
       const authHeader =
-        client.handshake.auth?.token || client.handshake.headers?.authorization;
+        typeof authToken === 'string' ? authToken : headerToken;
       let token = '';
 
       if (authHeader && authHeader.startsWith('Bearer ')) {
         token = authHeader.split(' ')[1];
       } else {
-        const queryToken = client.handshake.query.token as string;
-        if (queryToken) {
+        const queryToken = client.handshake.query.token;
+        if (typeof queryToken === 'string') {
           token = queryToken;
         }
       }
@@ -195,7 +221,7 @@ export class LocationsGateway
         return;
       }
 
-      const payload = this.jwtService.verify(token);
+      const payload = this.jwtService.verify<AccessTokenPayload>(token);
       const userId = payload.sub;
 
       if (!userId || !payload.sid || payload.typ !== 'access') {
@@ -227,22 +253,24 @@ export class LocationsGateway
       client.data.sessionId = session.id;
 
       // Oturum sonradan kapatılırsa bir sonraki socket mesajında bağlantıyı kes.
-      client.use(async (_packet, next) => {
-        const activeSession = await this.prisma.session.findFirst({
-          where: {
-            id: client.data.sessionId,
-            userId: client.data.userId,
-            revokedAt: null,
-            expiresAt: { gt: new Date() },
-          },
-          select: { id: true },
-        });
-        if (!activeSession) {
-          client.disconnect(true);
-          next(new Error('Oturum kapatılmış veya süresi dolmuş.'));
-          return;
-        }
-        next();
+      client.use((_packet, next) => {
+        void (async () => {
+          const activeSession = await this.prisma.session.findFirst({
+            where: {
+              id: client.data.sessionId,
+              userId: client.data.userId,
+              revokedAt: null,
+              expiresAt: { gt: new Date() },
+            },
+            select: { id: true },
+          });
+          if (!activeSession) {
+            client.disconnect(true);
+            next(new Error('Oturum kapatılmış veya süresi dolmuş.'));
+            return;
+          }
+          next();
+        })();
       });
 
       // Token süresi dolunca açık WebSocket bağlantısını da kapat.
@@ -266,14 +294,15 @@ export class LocationsGateway
       // Veritabanındaki bağlantı durumunu çevrimiçi yap
       await this.updateUserConnectionStatus(userId, 'online');
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       this.logger.error(
-        `Soket bağlantısı doğrulanamadı: ${err.message}. Cihaz: ${client.id}`,
+        `Soket bağlantısı doğrulanamadı: ${message}. Cihaz: ${client.id}`,
       );
       client.disconnect(true);
     }
   }
 
-  async handleDisconnect(client: Socket) {
+  async handleDisconnect(client: AuthenticatedSocket) {
     if (client.data.authExpiryTimer) {
       clearTimeout(client.data.authExpiryTimer);
     }
@@ -357,7 +386,7 @@ export class LocationsGateway
   @SubscribeMessage('joinFamily')
   async handleJoinFamily(
     @MessageBody() data: { familyId: string },
-    @ConnectedSocket() client: Socket,
+    @ConnectedSocket() client: AuthenticatedSocket,
   ) {
     const userId = client.data.userId;
     if (!userId) {
@@ -388,14 +417,14 @@ export class LocationsGateway
     }
 
     const room = `family_${data.familyId}`;
-    client.join(room);
+    void client.join(room);
     this.logger.log(`İstemci (${client.id}), odaya katıldı: ${room}`);
     return { status: 'success', room };
   }
 
   @SubscribeMessage('joinAdminControlRoom')
   async handleJoinAdminControlRoom(
-    @ConnectedSocket() client: Socket,
+    @ConnectedSocket() client: AuthenticatedSocket,
   ) {
     const userId = client.data.userId;
     if (!userId) {
@@ -404,22 +433,24 @@ export class LocationsGateway
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { role: true }
+      select: { role: true },
     });
 
     if (!user || user.role !== 'admin') {
       return { status: 'error', message: 'Sadece yöneticiler katılabilir.' };
     }
 
-    client.join('admin_control_room');
-    this.logger.log(`İstemci (${client.id}), admin_control_room odasına katıldı.`);
+    void client.join('admin_control_room');
+    this.logger.log(
+      `İstemci (${client.id}), admin_control_room odasına katıldı.`,
+    );
     return { status: 'success' };
   }
 
   @SubscribeMessage('leaveFamily')
-  async handleLeaveFamily(
+  handleLeaveFamily(
     @MessageBody() data: { familyId: string },
-    @ConnectedSocket() client: Socket,
+    @ConnectedSocket() client: AuthenticatedSocket,
   ) {
     const userId = client.data.userId;
     if (!userId) {
@@ -427,7 +458,7 @@ export class LocationsGateway
     }
 
     const room = `family_${data.familyId}`;
-    client.leave(room);
+    void client.leave(room);
     this.logger.log(
       `İstemci (${client.id} - ${userId}), odadan ayrıldı: ${room}`,
     );
@@ -435,10 +466,7 @@ export class LocationsGateway
   }
 
   @SubscribeMessage('sendDeviceLock')
-  async handleSendDeviceLock(
-    @MessageBody() data: { targetUserId: string; lockState: boolean },
-    @ConnectedSocket() client: Socket,
-  ) {
+  handleSendDeviceLock() {
     return {
       status: 'error',
       message: 'Cihaz kilitleme özelliği devre dışı bırakılmıştır.',
@@ -446,7 +474,7 @@ export class LocationsGateway
   }
 
   // Aile odasına konum güncellemesini yayınlar
-  sendLocationUpdate(familyId: string, locationData: any) {
+  sendLocationUpdate(familyId: string, locationData: Record<string, unknown>) {
     const room = `family_${familyId}`;
     this.server.to(room).emit('location_update', locationData);
     this.server.to('admin_control_room').emit('location_update', locationData);
@@ -456,7 +484,15 @@ export class LocationsGateway
   }
 
   // Aile odasındaki sadece velilere (guardian) alarm bildirimini gönderir
-  async sendAlertNotification(familyId: string, alertData: any) {
+  async sendAlertNotification(
+    familyId: string,
+    alertData: Record<string, unknown> & {
+      senderId?: string;
+      userId?: string;
+      data?: Record<string, unknown> & { userId?: string };
+      title?: string;
+    },
+  ) {
     try {
       const senderId =
         alertData.senderId || alertData.userId || alertData.data?.userId;
@@ -479,17 +515,21 @@ export class LocationsGateway
       for (const guardian of targetGuardians) {
         this.sendEventToUser(guardian.userId, 'alert_notification', alertData);
       }
-      this.server.to('admin_control_room').emit('alert_notification', alertData);
+      this.server
+        .to('admin_control_room')
+        .emit('alert_notification', alertData);
       this.logger.log(
         `Aile Grubu (${familyId}) için velilere (${targetGuardians.length} kişi) ve admin_control_room odasına alarm bildirimi iletildi: ${alertData.title}`,
       );
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       this.logger.error(
-        `Alarm bildirimi velilere gönderilirken hata oluştu: ${err.message}`,
+        `Alarm bildirimi velilere gönderilirken hata oluştu: ${message}`,
       );
     }
   }
 
+  /* Video call feature temporarily disabled.
   @SubscribeMessage('video_call_request')
   async handleVideoCallRequest(
     @MessageBody() data: { targetUserId: string },
@@ -509,10 +549,9 @@ export class LocationsGateway
     });
 
     if (!sent) {
-      // Çocuğun interneti/soketi kapalıysa OneSignal Push Bildirimi atarak telefonu uyandıralım
       await this.sendPushNotification(
         [data.targetUserId],
-        '📞 GÖRÜNTÜLÜ ARAMA ÇAĞRISI',
+        'GÖRÜNTÜLÜ ARAMA ÇAĞRISI',
         `${caller?.name || 'Veliniz'} görüntülü arama başlatmak istiyor.`,
         { action: 'incoming_video_call', callerId },
       );
@@ -520,7 +559,16 @@ export class LocationsGateway
 
     return { status: 'success' };
   }
+  */
+  @SubscribeMessage('video_call_request')
+  handleVideoCallRequestDisabled() {
+    return {
+      status: 'disabled',
+      message: 'Goruntulu arama ozelligi gecici olarak kapali.',
+    };
+  }
 
+  /* Video call feature temporarily disabled.
   @SubscribeMessage('video_call_response')
   handleVideoCallResponse(
     @MessageBody() data: { targetUserId: string; accepted: boolean },
@@ -535,7 +583,16 @@ export class LocationsGateway
     });
     return { status: 'success' };
   }
+  */
+  @SubscribeMessage('video_call_response')
+  handleVideoCallResponseDisabled() {
+    return {
+      status: 'disabled',
+      message: 'Goruntulu arama ozelligi gecici olarak kapali.',
+    };
+  }
 
+  /* Video call feature temporarily disabled.
   @SubscribeMessage('webrtc_signal')
   handleWebRTCSignal(
     @MessageBody() data: { targetUserId: string; signal: any },
@@ -549,6 +606,14 @@ export class LocationsGateway
       signal: data.signal,
     });
     return { status: 'success' };
+  }
+  */
+  @SubscribeMessage('webrtc_signal')
+  handleWebRTCSignalDisabled() {
+    return {
+      status: 'disabled',
+      message: 'Goruntulu arama ozelligi gecici olarak kapali.',
+    };
   }
 
   // Belirli bir kullanıcının tüm aktif soketlerine event gönderir

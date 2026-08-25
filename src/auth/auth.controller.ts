@@ -5,6 +5,7 @@ import {
   Post,
   UseGuards,
   BadRequestException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
@@ -14,6 +15,7 @@ import { GetUser } from './decorators/get-user.decorator';
 import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
 import { Throttle } from '@nestjs/throttler';
 import { RefreshTokenDto } from './dto/session.dto';
+import type { AuthenticatedUser } from './types/authenticated-user';
 
 class ForgotPasswordDto {
   @IsEmail({}, { message: 'Geçerli bir e-posta adresi giriniz.' })
@@ -74,13 +76,16 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Post('logout')
-  async logout(@GetUser() user: any) {
+  logout(@GetUser() user: AuthenticatedUser) {
+    if (!user.sessionId) {
+      throw new UnauthorizedException('Oturum bilgisi bulunamadı.');
+    }
     return this.authService.logout(user.sessionId);
   }
 
   @UseGuards(JwtAuthGuard)
   @Post('logout-all')
-  async logoutAll(@GetUser() user: any) {
+  logoutAll(@GetUser() user: AuthenticatedUser) {
     return this.authService.logoutAll(user.id);
   }
 
@@ -98,7 +103,7 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Get('me')
-  async getMe(@GetUser() user: any) {
+  getMe(@GetUser() user: AuthenticatedUser) {
     return user;
   }
 }

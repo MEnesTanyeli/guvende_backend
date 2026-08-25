@@ -1,7 +1,18 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { FamiliesService } from './families.service';
 import { CreateFamilyDto } from './dto/create-family.dto';
 import { JoinFamilyDto } from './dto/join-family.dto';
+import { MuteNotificationsDto } from './dto/mute-notifications.dto';
+import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 
@@ -29,9 +40,14 @@ export class FamiliesController {
   async updateMemberRole(
     @GetUser('id') userId: string,
     @Param('id') familyId: string,
-    @Body() body: { targetUserId: string; memberType: string },
+    @Body() dto: UpdateMemberRoleDto,
   ) {
-    return this.familiesService.updateMemberRole(userId, familyId, body.targetUserId, body.memberType);
+    return this.familiesService.updateMemberRole(
+      userId,
+      familyId,
+      dto.targetUserId,
+      dto.memberType,
+    );
   }
 
   @Get(':id')
@@ -67,9 +83,8 @@ export class FamiliesController {
   async muteNotifications(
     @GetUser('id') userId: string,
     @Param('id') familyId: string,
-    @Body() body: { mute: boolean },
+    @Body() dto: MuteNotificationsDto,
   ) {
-    return this.familiesService.muteNotifications(userId, familyId, body.mute);
+    return this.familiesService.muteNotifications(userId, familyId, dto.mute);
   }
 }
-

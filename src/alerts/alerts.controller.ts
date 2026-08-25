@@ -10,7 +10,10 @@ export class AlertsController {
   constructor(private alertsService: AlertsService) {}
 
   @Get('families/:familyId/alerts')
-  async findAll(@GetUser('id') userId: string, @Param('familyId') familyId: string) {
+  async findAll(
+    @GetUser('id') userId: string,
+    @Param('familyId') familyId: string,
+  ) {
     return this.alertsService.findAll(userId, familyId);
   }
 
@@ -20,7 +23,10 @@ export class AlertsController {
   }
 
   @Post('families/:familyId/alerts/resolve-all')
-  async resolveAll(@GetUser('id') userId: string, @Param('familyId') familyId: string) {
+  async resolveAll(
+    @GetUser('id') userId: string,
+    @Param('familyId') familyId: string,
+  ) {
     return this.alertsService.resolveAll(userId, familyId);
   }
 }

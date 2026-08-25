@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   ConflictException,
   HttpException,
   UnauthorizedException,
@@ -132,7 +131,7 @@ describe('AuthService security flows', () => {
       password: 'password123',
       name: 'User',
       code,
-    } as any);
+    });
 
     expect(prisma.user.create).toHaveBeenCalled();
     expect(prisma.emailVerification.delete).toHaveBeenCalledWith({

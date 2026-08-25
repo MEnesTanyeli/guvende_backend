@@ -1,4 +1,8 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AlertStatus, MemberType } from '@prisma/client';
 
@@ -18,11 +22,15 @@ export class AlertsService {
     });
 
     if (!membership) {
-      throw new ForbiddenException('Bu aile grubunun alarmlarını görüntüleme yetkiniz yok.');
+      throw new ForbiddenException(
+        'Bu aile grubunun alarmlarını görüntüleme yetkiniz yok.',
+      );
     }
 
     if (membership.memberType !== MemberType.guardian) {
-      throw new ForbiddenException('Sadece veliler/koruyucular (guardian) alarmları görüntüleyebilir.');
+      throw new ForbiddenException(
+        'Sadece veliler/koruyucular (guardian) alarmları görüntüleyebilir.',
+      );
     }
 
     return this.prisma.alert.findMany({
@@ -64,11 +72,15 @@ export class AlertsService {
     });
 
     if (!membership) {
-      throw new ForbiddenException('Bu aile grubunun alarmını çözmeye yetkiniz yok.');
+      throw new ForbiddenException(
+        'Bu aile grubunun alarmını çözmeye yetkiniz yok.',
+      );
     }
 
     if (membership.memberType !== MemberType.guardian) {
-      throw new ForbiddenException('Sadece veliler/koruyucular (guardian) alarmları çözebilir.');
+      throw new ForbiddenException(
+        'Sadece veliler/koruyucular (guardian) alarmları çözebilir.',
+      );
     }
 
     return this.prisma.alert.update({
@@ -92,11 +104,15 @@ export class AlertsService {
     });
 
     if (!membership) {
-      throw new ForbiddenException('Bu aile grubunun alarmlarını çözmeye yetkiniz yok.');
+      throw new ForbiddenException(
+        'Bu aile grubunun alarmlarını çözmeye yetkiniz yok.',
+      );
     }
 
     if (membership.memberType !== MemberType.guardian) {
-      throw new ForbiddenException('Sadece veliler/koruyucular (guardian) alarmları çözebilir.');
+      throw new ForbiddenException(
+        'Sadece veliler/koruyucular (guardian) alarmları çözebilir.',
+      );
     }
 
     return this.prisma.alert.updateMany({

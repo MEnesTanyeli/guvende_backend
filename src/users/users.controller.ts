@@ -1,8 +1,18 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 import { IsOptional, IsString } from 'class-validator';
+import { SetProxyDto } from './dto/set-proxy.dto';
+import { UpdateDevicePermissionsDto } from './dto/update-device-permissions.dto';
 
 class UpdateProfileDto {
   @IsString()
@@ -29,8 +39,16 @@ export class UsersController {
   }
 
   @Patch('profile')
-  async updateProfile(@GetUser('id') userId: string, @Body() dto: UpdateProfileDto) {
-    return this.usersService.updateProfile(userId, dto.name, dto.phone, dto.gender);
+  async updateProfile(
+    @GetUser('id') userId: string,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    return this.usersService.updateProfile(
+      userId,
+      dto.name,
+      dto.phone,
+      dto.gender,
+    );
   }
 
   @Post('purchase-mock')
@@ -38,8 +56,8 @@ export class UsersController {
     return this.usersService.purchasePremiumMock(userId);
   }
   @Post('proxy')
-  async setProxy(@GetUser('id') userId: string, @Body() body: { email: string }) {
-    return this.usersService.setProxy(userId, body.email);
+  async setProxy(@GetUser('id') userId: string, @Body() dto: SetProxyDto) {
+    return this.usersService.setProxy(userId, dto.email);
   }
 
   @Patch('proxy/remove') // Or @Delete('proxy') but since Ionic HttpClient/Angular uses Delete sometimes with no body, let's also support DELETE proxy
@@ -53,12 +71,18 @@ export class UsersController {
   }
 
   @Post(':id/reset-device')
-  async resetDevice(@GetUser('id') guardianId: string, @Param('id') childId: string) {
+  async resetDevice(
+    @GetUser('id') guardianId: string,
+    @Param('id') childId: string,
+  ) {
     return this.usersService.resetDevice(guardianId, childId);
   }
 
   @Patch('device-permissions')
-  async updateDevicePermissions(@GetUser('id') userId: string, @Body() dto: any) {
-    return this.usersService.updateDevicePermissions(userId, dto);
+  async updateDevicePermissions(
+    @GetUser('id') userId: string,
+    @Body() dto: UpdateDevicePermissionsDto,
+  ) {
+    return this.usersService.updateDevicePermissions(userId, dto.permissions);
   }
 }

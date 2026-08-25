@@ -6,7 +6,9 @@ export class JoinFamilyDto {
   @IsNotEmpty({ message: 'Aile kodu / kimliği boş bırakılamaz.' })
   familyId: string;
 
-  @IsEnum(MemberType, { message: 'Geçersiz üye tipi (guardian, child, elder).' })
+  @IsEnum(MemberType, {
+    message: 'Geçersiz üye tipi (guardian, child, elder).',
+  })
   @IsOptional()
   memberType?: MemberType;
 }

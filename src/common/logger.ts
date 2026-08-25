@@ -1,18 +1,23 @@
+import { LoggerService } from '@nestjs/common';
 import * as winston from 'winston';
 import 'winston-daily-rotate-file';
+
+function stringifyLogMessage(message: unknown): string {
+  return typeof message === 'string' ? message : JSON.stringify(message);
+}
 
 // Format custom text outputs
 const textFormat = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.printf(({ timestamp, level, message }) => {
-    return `${timestamp} [${level.toUpperCase()}]: ${message}`;
-  })
+    return `${String(timestamp)} [${level.toUpperCase()}]: ${String(message)}`;
+  }),
 );
 
 // Format JSON outputs for alerts and structured events
 const jsonFormat = winston.format.combine(
   winston.format.timestamp(),
-  winston.format.json()
+  winston.format.json(),
 );
 
 // 1. Error Logs Daily Rotate: logs/error-YYYY-MM-DD.log (retention: 14 days)
@@ -57,32 +62,47 @@ export const eventLogger = winston.createLogger({
   ],
 });
 
-import { LoggerService } from '@nestjs/common';
-
 export class AppLogger implements LoggerService {
-  log(message: any, context?: string) {
-    if (context === 'CronService' || (typeof message === 'string' && message.includes('[CRON]'))) {
-      cronLogger.info(message);
-    } else if (context === 'AlertsService' || context === 'LocationsService' || context === 'BatteryService') {
+  log(message: unknown, context?: string) {
+    const text = stringifyLogMessage(message);
+    if (
+      context === 'CronService' ||
+      (typeof message === 'string' && message.includes('[CRON]'))
+    ) {
+      cronLogger.info(text);
+    } else if (
+      context === 'AlertsService' ||
+      context === 'LocationsService' ||
+      context === 'BatteryService'
+    ) {
       eventLogger.info({ context, message });
     } else {
-      console.log(`[LOG] ${context ? `[${context}] ` : ''}${message}`);
+      console.log(`[LOG] ${context ? `[${context}] ` : ''}${text}`);
     }
   }
 
-  error(message: any, stack?: string, context?: string) {
-    errorLogger.error(`${context ? `[${context}] ` : ''}${message}${stack ? `\nStack: ${stack}` : ''}`);
+  error(message: unknown, stack?: string, context?: string) {
+    const text = stringifyLogMessage(message);
+    errorLogger.error(
+      `${context ? `[${context}] ` : ''}${text}${stack ? `\nStack: ${stack}` : ''}`,
+    );
   }
 
-  warn(message: any, context?: string) {
-    console.warn(`[WARN] ${context ? `[${context}] ` : ''}${message}`);
+  warn(message: unknown, context?: string) {
+    console.warn(
+      `[WARN] ${context ? `[${context}] ` : ''}${stringifyLogMessage(message)}`,
+    );
   }
 
-  debug(message: any, context?: string) {
-    console.debug(`[DEBUG] ${context ? `[${context}] ` : ''}${message}`);
+  debug(message: unknown, context?: string) {
+    console.debug(
+      `[DEBUG] ${context ? `[${context}] ` : ''}${stringifyLogMessage(message)}`,
+    );
   }
 
-  verbose(message: any, context?: string) {
-    console.log(`[VERBOSE] ${context ? `[${context}] ` : ''}${message}`);
+  verbose(message: unknown, context?: string) {
+    console.log(
+      `[VERBOSE] ${context ? `[${context}] ` : ''}${stringifyLogMessage(message)}`,
+    );
   }
 }

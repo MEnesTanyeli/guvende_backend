@@ -1,4 +1,10 @@
-import { IsString, IsInt, IsArray, ValidateNested, IsOptional } from 'class-validator';
+import {
+  IsString,
+  IsInt,
+  IsArray,
+  ValidateNested,
+  IsOptional,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class AppUsageItemDto {

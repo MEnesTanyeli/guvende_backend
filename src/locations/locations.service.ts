@@ -1,4 +1,9 @@
-import { Injectable, ForbiddenException, NotFoundException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  ForbiddenException,
+  NotFoundException,
+  Logger,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RecordLocationDto } from './dto/record-location.dto';
 import { RecordBulkLocationsDto } from './dto/record-bulk-locations.dto';
@@ -31,10 +36,14 @@ export class LocationsService {
     return `${year}-${month}-${day}`;
   }
 
-  private getIstanbulDayRangeUtc(dateStr?: string): { startOfDay: Date; endOfDay: Date } {
-    const dateKey = dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)
-      ? dateStr
-      : this.getIstanbulDateKey();
+  private getIstanbulDayRangeUtc(dateStr?: string): {
+    startOfDay: Date;
+    endOfDay: Date;
+  } {
+    const dateKey =
+      dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)
+        ? dateStr
+        : this.getIstanbulDateKey();
     const [year, month, day] = dateKey.split('-').map(Number);
 
     const startMs = Date.UTC(year, month - 1, day, -3, 0, 0, 0);
@@ -46,7 +55,12 @@ export class LocationsService {
     };
   }
   // Mesafe hesabı için Haversine Formülü (metre cinsinden döndürür)
-  private getDistanceInMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  private getDistanceInMeters(
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number,
+  ): number {
     const R = 6371000; // Dünya yarıçapı (metre)
     const dLat = (lat2 - lat1) * (Math.PI / 180);
     const dLon = (lon2 - lon1) * (Math.PI / 180);
@@ -281,13 +295,16 @@ export class LocationsService {
         });
 
         // Velinin bildiği son durum bir bölgenin içindeydi, ama çocuk şu an dışarıda
-        if (lastGeofenceAlert?.type === AlertType.safe_zone_enter && !insideZoneId) {
-          const lastZoneName = lastGeofenceAlert.metadata
-            ? (lastGeofenceAlert.metadata as any).safeZoneName
-            : 'Güvenli Bölge';
-          const lastZoneId = lastGeofenceAlert.metadata
-            ? (lastGeofenceAlert.metadata as any).safeZoneId
-            : null;
+        if (
+          lastGeofenceAlert?.type === AlertType.safe_zone_enter &&
+          !insideZoneId
+        ) {
+          const lastMetadata = lastGeofenceAlert.metadata as {
+            safeZoneName?: string;
+            safeZoneId?: string;
+          } | null;
+          const lastZoneName = lastMetadata?.safeZoneName ?? 'Güvenli Bölge';
+          const lastZoneId = lastMetadata?.safeZoneId ?? null;
 
           const alertTitle = 'Güvenli Bölgeden Çıkış';
           const alertMsg = `${user.name}, "${lastZoneName}" güvenli bölgesinden çıkış yaptı!`;
@@ -299,7 +316,11 @@ export class LocationsService {
               type: AlertType.safe_zone_exit,
               title: alertTitle,
               message: alertMsg,
-              metadata: { safeZoneId: lastZoneId, safeZoneName: lastZoneName, delayedTrigger: true },
+              metadata: {
+                safeZoneId: lastZoneId,
+                safeZoneName: lastZoneName,
+                delayedTrigger: true,
+              },
             },
           });
 
@@ -313,7 +334,8 @@ export class LocationsService {
         }
         // Velinin bildiği son durum dışarıdaydı (veya yoktu), ama çocuk şu an bir bölgenin içinde
         else if (
-          (!lastGeofenceAlert || lastGeofenceAlert.type === AlertType.safe_zone_exit) &&
+          (!lastGeofenceAlert ||
+            lastGeofenceAlert.type === AlertType.safe_zone_exit) &&
           insideZoneId
         ) {
           const zone = safeZones.find((z) => z.id === insideZoneId);
@@ -328,7 +350,11 @@ export class LocationsService {
                 type: AlertType.safe_zone_enter,
                 title: alertTitle,
                 message: alertMsg,
-                metadata: { safeZoneId: zone.id, safeZoneName: zone.name, delayedTrigger: true },
+                metadata: {
+                  safeZoneId: zone.id,
+                  safeZoneName: zone.name,
+                  delayedTrigger: true,
+                },
               },
             });
 
@@ -426,7 +452,10 @@ export class LocationsService {
 
     // 2. En son (en güncel) konumu ayıralım, diğerlerini geçmiş veri yapalım
     const latestLocationDto = sortedLocations[sortedLocations.length - 1];
-    const historicalLocationDtos = sortedLocations.slice(0, sortedLocations.length - 1);
+    const historicalLocationDtos = sortedLocations.slice(
+      0,
+      sortedLocations.length - 1,
+    );
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -458,7 +487,10 @@ export class LocationsService {
 
     // 4. En güncel konumu mevcut recordLocation metoduyla işleyelim.
     // Bu sayede en son duruma göre gerekli tüm canlı bildirim ve WebSocket işlemleri tetiklenmiş olur.
-    const savedLatestLocation = await this.recordLocation(userId, latestLocationDto);
+    const savedLatestLocation = await this.recordLocation(
+      userId,
+      latestLocationDto,
+    );
 
     return {
       success: true,
@@ -479,7 +511,9 @@ export class LocationsService {
     });
 
     if (!isMember) {
-      throw new ForbiddenException('Bu aile grubunun konum verilerine erişim yetkiniz yok.');
+      throw new ForbiddenException(
+        'Bu aile grubunun konum verilerine erişim yetkiniz yok.',
+      );
     }
 
     const safeZones = await this.prisma.safeZone.findMany({
@@ -571,7 +605,12 @@ export class LocationsService {
     return latestLocations.filter((loc) => loc !== null);
   }
 
-  async getLocationsHistory(userId: string, familyId: string, targetUserId: string, dateStr?: string) {
+  async getLocationsHistory(
+    userId: string,
+    familyId: string,
+    targetUserId: string,
+    dateStr?: string,
+  ) {
     // Ailede üyelik kontrolü
     const isMember = await this.prisma.familyMember.findUnique({
       where: {
@@ -583,7 +622,9 @@ export class LocationsService {
     });
 
     if (!isMember) {
-      throw new ForbiddenException('Bu aile grubunun verilerine erişim yetkiniz yok.');
+      throw new ForbiddenException(
+        'Bu aile grubunun verilerine erişim yetkiniz yok.',
+      );
     }
 
     // Hedef kullanıcının ailede üye olup olmadığı kontrolü
@@ -597,7 +638,9 @@ export class LocationsService {
     });
 
     if (!targetMember) {
-      throw new NotFoundException('Hedef kullanıcı bu aile grubunda bulunamadı.');
+      throw new NotFoundException(
+        'Hedef kullanıcı bu aile grubunda bulunamadı.',
+      );
     }
 
     // Tarih araligini Turkiye gunune gore UTC olarak belirle.
@@ -646,7 +689,9 @@ export class LocationsService {
     });
 
     if (!isAuthorized) {
-      throw new ForbiddenException('Bu üyeye sesli uyarı gönderme yetkiniz yok.');
+      throw new ForbiddenException(
+        'Bu üyeye sesli uyarı gönderme yetkiniz yok.',
+      );
     }
 
     const sender = await this.prisma.user.findUnique({
@@ -663,13 +708,20 @@ export class LocationsService {
         action: 'play_warning_sound',
         senderName: sender?.name || 'Veliniz',
         senderId,
-      }
+      },
     );
 
-    return { success: true, message: 'Sesli uyarı push bildirim olarak gönderildi.' };
+    return {
+      success: true,
+      message: 'Sesli uyarı push bildirim olarak gönderildi.',
+    };
   }
 
-  async ackAudibleWarning(childId: string, senderId: string, action: 'received' | 'muted' | 'unanswered') {
+  async ackAudibleWarning(
+    childId: string,
+    senderId: string,
+    action: 'received' | 'muted' | 'unanswered',
+  ) {
     const child = await this.prisma.user.findUnique({
       where: { id: childId },
       select: { name: true },
@@ -721,14 +773,18 @@ export class LocationsService {
         childId,
         alertTitle,
         alertMsg,
-        { action: 'audible_warning_unanswered', childId }
+        { action: 'audible_warning_unanswered', childId },
       );
     }
 
     return { success: true };
   }
 
-  async deleteTodayLocations(userId: string, familyId: string, targetUserId: string) {
+  async deleteTodayLocations(
+    userId: string,
+    familyId: string,
+    targetUserId: string,
+  ) {
     // Ailede üyelik kontrolü
     const isMember = await this.prisma.familyMember.findUnique({
       where: {
@@ -740,7 +796,9 @@ export class LocationsService {
     });
 
     if (!isMember) {
-      throw new ForbiddenException('Bu aile grubunun verilerine erişim yetkiniz yok.');
+      throw new ForbiddenException(
+        'Bu aile grubunun verilerine erişim yetkiniz yok.',
+      );
     }
 
     // Hedef kullanıcının ailede üye olup olmadığı kontrolü
@@ -754,7 +812,9 @@ export class LocationsService {
     });
 
     if (!targetMember) {
-      throw new NotFoundException('Hedef kullanıcı bu aile grubunda bulunamadı.');
+      throw new NotFoundException(
+        'Hedef kullanıcı bu aile grubunda bulunamadı.',
+      );
     }
 
     const { startOfDay, endOfDay } = this.getIstanbulDayRangeUtc();
@@ -770,7 +830,11 @@ export class LocationsService {
     });
   }
 
-  async triggerTestLocationEvent(userId: string, familyId: string, targetUserId: string) {
+  async triggerTestLocationEvent(
+    userId: string,
+    familyId: string,
+    targetUserId: string,
+  ) {
     // Ailede üyelik kontrolü
     const isMember = await this.prisma.familyMember.findUnique({
       where: {
@@ -796,10 +860,11 @@ export class LocationsService {
     });
 
     if (!targetMember) {
-      throw new NotFoundException('Hedef kullanıcı bu aile grubunda bulunamadı.');
+      throw new NotFoundException(
+        'Hedef kullanıcı bu aile grubunda bulunamadı.',
+      );
     }
 
     return { success: true };
   }
 }
-

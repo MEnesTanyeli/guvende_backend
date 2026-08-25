@@ -1,4 +1,8 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateMedicationDto } from './dto/create-medication.dto';
 import { UpdateMedicationDto } from './dto/update-medication.dto';
@@ -17,7 +21,9 @@ export class MedicationsService {
   async createReminder(creatorId: string, dto: CreateMedicationDto) {
     const creatorProfile = await this.usersService.findOne(creatorId);
     if (!creatorProfile.isPremium) {
-      throw new ForbiddenException('İlaç Takibi özelliği sadece Premium üyeler içindir.');
+      throw new ForbiddenException(
+        'İlaç Takibi özelliği sadece Premium üyeler içindir.',
+      );
     }
 
     const targetUser = await this.prisma.user.findUnique({
@@ -27,7 +33,9 @@ export class MedicationsService {
       throw new NotFoundException('İlaç atanacak üye bulunamadı.');
     }
     if (targetUser.role !== 'elder' && targetUser.role !== 'child') {
-      throw new ForbiddenException('İlaç hatırlatıcıları sadece çocuklar veya aile büyükleri için tanımlanabilir.');
+      throw new ForbiddenException(
+        'İlaç hatırlatıcıları sadece çocuklar veya aile büyükleri için tanımlanabilir.',
+      );
     }
 
     const commonFamily = await this.prisma.familyMember.findFirst({
@@ -45,7 +53,9 @@ export class MedicationsService {
     });
 
     if (!commonFamily) {
-      throw new ForbiddenException('Bu üyeye ilaç hatırlatıcısı ekleme yetkiniz yok.');
+      throw new ForbiddenException(
+        'Bu üyeye ilaç hatırlatıcısı ekleme yetkiniz yok.',
+      );
     }
 
     return this.prisma.medicationReminder.create({
@@ -97,7 +107,9 @@ export class MedicationsService {
     });
 
     if (!commonFamily) {
-      throw new ForbiddenException('Bu ilaç hatırlatıcısını silme yetkiniz yok.');
+      throw new ForbiddenException(
+        'Bu ilaç hatırlatıcısını silme yetkiniz yok.',
+      );
     }
 
     return this.prisma.medicationReminder.delete({
@@ -178,13 +190,20 @@ export class MedicationsService {
         },
       });
 
-      this.locationsGateway.sendAlertNotification(membership.familyId, alert);
+      await this.locationsGateway.sendAlertNotification(
+        membership.familyId,
+        alert,
+      );
     }
 
     return updated;
   }
 
-  async updateReminder(reminderId: string, updaterId: string, dto: UpdateMedicationDto) {
+  async updateReminder(
+    reminderId: string,
+    updaterId: string,
+    dto: UpdateMedicationDto,
+  ) {
     const reminder = await this.prisma.medicationReminder.findUnique({
       where: { id: reminderId },
     });
@@ -219,7 +238,12 @@ export class MedicationsService {
         time: dto.time,
         reminderType: dto.reminderType,
         startDate: dto.startDate ? new Date(dto.startDate) : undefined,
-        repeatDays: dto.repeatDays !== undefined ? (dto.repeatDays ? Number(dto.repeatDays) : null) : undefined,
+        repeatDays:
+          dto.repeatDays !== undefined
+            ? dto.repeatDays
+              ? Number(dto.repeatDays)
+              : null
+            : undefined,
       },
     });
   }

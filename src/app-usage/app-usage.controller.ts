@@ -11,12 +11,22 @@ export class AppUsageController {
   constructor(private appUsageService: AppUsageService) {}
 
   @Post()
-  async saveAppUsage(@GetUser('id') userId: string, @Body() dto: SaveAppUsageDto) {
-    return this.appUsageService.saveAppUsage(userId, dto.usages, dto.recordedDate);
+  async saveAppUsage(
+    @GetUser('id') userId: string,
+    @Body() dto: SaveAppUsageDto,
+  ) {
+    return this.appUsageService.saveAppUsage(
+      userId,
+      dto.usages,
+      dto.recordedDate,
+    );
   }
 
   @Get('member/:memberId')
-  async getMemberAppUsage(@GetUser('id') userId: string, @Param('memberId') memberId: string) {
+  async getMemberAppUsage(
+    @GetUser('id') userId: string,
+    @Param('memberId') memberId: string,
+  ) {
     return this.appUsageService.getMemberAppUsage(userId, memberId);
   }
 }

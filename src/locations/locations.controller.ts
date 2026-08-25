@@ -1,4 +1,13 @@
-import { Body, Controller, Delete, Get, Param, Post, UseGuards, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  UseGuards,
+  Query,
+} from '@nestjs/common';
 import { LocationsService } from './locations.service';
 import { RecordLocationDto } from './dto/record-location.dto';
 import { RecordBulkLocationsDto } from './dto/record-bulk-locations.dto';
@@ -12,12 +21,18 @@ export class LocationsController {
   constructor(private locationsService: LocationsService) {}
 
   @Post('locations')
-  async recordLocation(@GetUser('id') userId: string, @Body() dto: RecordLocationDto) {
+  async recordLocation(
+    @GetUser('id') userId: string,
+    @Body() dto: RecordLocationDto,
+  ) {
     return this.locationsService.recordLocation(userId, dto);
   }
 
   @Post('locations/bulk')
-  async recordBulkLocations(@GetUser('id') userId: string, @Body() dto: RecordBulkLocationsDto) {
+  async recordBulkLocations(
+    @GetUser('id') userId: string,
+    @Body() dto: RecordBulkLocationsDto,
+  ) {
     return this.locationsService.recordBulkLocations(userId, dto);
   }
 
@@ -36,7 +51,12 @@ export class LocationsController {
     @Param('targetUserId') targetUserId: string,
     @Query('date') dateStr?: string,
   ) {
-    return this.locationsService.getLocationsHistory(userId, familyId, targetUserId, dateStr);
+    return this.locationsService.getLocationsHistory(
+      userId,
+      familyId,
+      targetUserId,
+      dateStr,
+    );
   }
 
   @Post('locations/audible-warning')
@@ -62,7 +82,10 @@ export class LocationsController {
     @Param('familyId') familyId: string,
     @Param('targetUserId') targetUserId: string,
   ) {
-    return this.locationsService.deleteTodayLocations(userId, familyId, targetUserId);
+    return this.locationsService.deleteTodayLocations(
+      userId,
+      familyId,
+      targetUserId,
+    );
   }
-
 }

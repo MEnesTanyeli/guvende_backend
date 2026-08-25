@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateBatteryDto } from './dto/update-battery.dto';
 import { AlertStatus, AlertType } from '@prisma/client';
@@ -34,7 +38,7 @@ export class BatteryService {
     }
 
     // Yeni bir location kaydı oluşturarak tarihçede batarya değişimini tut
-    const newLoc = await this.prisma.location.create({
+    await this.prisma.location.create({
       data: {
         userId,
         latitude: lastLoc.latitude,

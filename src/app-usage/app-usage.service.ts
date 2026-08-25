@@ -5,7 +5,10 @@ import { PrismaService } from '../prisma/prisma.service';
 export class AppUsageService {
   constructor(private prisma: PrismaService) {}
 
-  async checkCommonFamily(userId: string, targetUserId: string): Promise<boolean> {
+  async checkCommonFamily(
+    userId: string,
+    targetUserId: string,
+  ): Promise<boolean> {
     const common = await this.prisma.familyMember.findFirst({
       where: {
         userId: targetUserId,
@@ -23,10 +26,16 @@ export class AppUsageService {
 
   async saveAppUsage(
     userId: string,
-    usages: Array<{ packageName: string; appName: string; durationMin: number }>,
+    usages: Array<{
+      packageName: string;
+      appName: string;
+      durationMin: number;
+    }>,
     recordedDateStr?: string,
   ) {
-    const startOfToday = recordedDateStr ? new Date(recordedDateStr) : new Date();
+    const startOfToday = recordedDateStr
+      ? new Date(recordedDateStr)
+      : new Date();
     startOfToday.setHours(0, 0, 0, 0);
 
     // 1. O güne ait mevcut kayıtları tek seferde çek (select yükünü minimize et)
@@ -47,7 +56,7 @@ export class AppUsageService {
       recordedDate: Date;
       lastUsedAt: Date;
     }> = [];
-    
+
     const toUpdate: Array<{
       id: string;
       durationMin: number;
@@ -107,7 +116,9 @@ export class AppUsageService {
     if (userId !== targetUserId) {
       const isShared = await this.checkCommonFamily(userId, targetUserId);
       if (!isShared) {
-        throw new ForbiddenException('Bu üyenin uygulama kullanım verilerini görme yetkiniz yok.');
+        throw new ForbiddenException(
+          'Bu üyenin uygulama kullanım verilerini görme yetkiniz yok.',
+        );
       }
     }
 

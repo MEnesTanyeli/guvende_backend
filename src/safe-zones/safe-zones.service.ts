@@ -1,4 +1,8 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSafeZoneDto } from './dto/create-safe-zone.dto';
 import { MemberType } from '@prisma/client';
@@ -24,7 +28,9 @@ export class SafeZonesService {
 
     // Sadece koruyucular (guardian) güvenli bölge ekleyebilir
     if (membership.memberType !== MemberType.guardian) {
-      throw new ForbiddenException('Güvenli bölge eklemek için koruyucu (guardian) olmalısınız.');
+      throw new ForbiddenException(
+        'Güvenli bölge eklemek için koruyucu (guardian) olmalısınız.',
+      );
     }
 
     return this.prisma.safeZone.create({
@@ -82,7 +88,9 @@ export class SafeZonesService {
     });
 
     if (!membership || membership.memberType !== MemberType.guardian) {
-      throw new ForbiddenException('Bu güvenli bölgeyi silmek için yetkiniz yok.');
+      throw new ForbiddenException(
+        'Bu güvenli bölgeyi silmek için yetkiniz yok.',
+      );
     }
 
     await this.prisma.safeZone.delete({

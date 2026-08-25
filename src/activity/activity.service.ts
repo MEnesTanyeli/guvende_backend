@@ -6,7 +6,12 @@ export class ActivityService {
   constructor(private prisma: PrismaService) {}
 
   // İki koordinat arası Haversine mesafe hesabı (metre cinsinden)
-  private getDistanceInMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  private getDistanceInMeters(
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number,
+  ): number {
     const R = 6371000;
     const dLat = (lat2 - lat1) * (Math.PI / 180);
     const dLon = (lon2 - lon1) * (Math.PI / 180);
@@ -22,7 +27,7 @@ export class ActivityService {
 
   async getDailyActivity(userId: string, dateStr?: string) {
     const targetDate = dateStr ? new Date(dateStr) : new Date();
-    
+
     // Günün başlangıç ve bitiş saatleri
     const startOfDay = new Date(targetDate);
     startOfDay.setHours(0, 0, 0, 0);
@@ -89,7 +94,12 @@ export class ActivityService {
 
     // En az 1 mekan (ev/başlangıç noktası) + tetiklenen farklı güvenli bölgeler
     const uniqueVisitedZones = new Set(
-      visitedZones.map((z) => (z.metadata as any)?.safeZoneId).filter(Boolean),
+      visitedZones
+        .map((z) => {
+          const metadata = z.metadata as { safeZoneId?: string } | null;
+          return metadata?.safeZoneId;
+        })
+        .filter(Boolean),
     );
     const visitedPlacesCount = Math.max(1, uniqueVisitedZones.size + 1);
 
@@ -118,7 +128,10 @@ export class ActivityService {
     };
   }
 
-  async checkCommonFamily(userId: string, targetUserId: string): Promise<boolean> {
+  async checkCommonFamily(
+    userId: string,
+    targetUserId: string,
+  ): Promise<boolean> {
     const common = await this.prisma.familyMember.findFirst({
       where: {
         userId: targetUserId,

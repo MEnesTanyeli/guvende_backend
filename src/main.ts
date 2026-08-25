@@ -1,6 +1,8 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { Logger, ValidationPipe } from '@nestjs/common';
+import type { Express, NextFunction, Request, Response } from 'express';
+import type { CorsOptions } from '@nestjs/common/interfaces/external/cors-options.interface';
 
 import { AppLogger, errorLogger } from './common/logger';
 
@@ -22,16 +24,22 @@ async function bootstrap() {
     logger: new AppLogger(),
   });
   const logger = new Logger('Bootstrap');
-  const httpAdapter = app.getHttpAdapter().getInstance();
+  const httpAdapter = app.getHttpAdapter().getInstance() as Express;
 
   httpAdapter.disable('x-powered-by');
   httpAdapter.set('trust proxy', 1);
-  app.use((_request: any, response: any, next: () => void) => {
+  app.use((_request: Request, response: Response, next: NextFunction) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('X-Frame-Options', 'DENY');
     response.setHeader('Referrer-Policy', 'no-referrer');
-    response.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-    response.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    response.setHeader(
+      'Permissions-Policy',
+      'camera=(), microphone=(), geolocation=()',
+    );
+    response.setHeader(
+      'Strict-Transport-Security',
+      'max-age=31536000; includeSubDomains',
+    );
     response.setHeader('Cache-Control', 'no-store');
     next();
   });
@@ -41,7 +49,7 @@ async function bootstrap() {
     .map((origin) => origin.trim())
     .filter(Boolean);
 
-  app.enableCors({
+  const corsOptions: CorsOptions = {
     origin: (origin, callback) => {
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
@@ -53,7 +61,9 @@ async function bootstrap() {
     allowedHeaders: ['Authorization', 'Content-Type'],
     credentials: false,
     maxAge: 86400,
-  });
+  };
+
+  app.enableCors(corsOptions);
 
   // DTO validation desteği
   app.useGlobalPipes(
@@ -75,4 +85,3 @@ bootstrap().catch((error) => {
   errorLogger.error(`Backend baslatilamadi: ${msg}`);
   process.exit(1);
 });
-

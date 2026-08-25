@@ -1,12 +1,18 @@
-import { CanActivate, ExecutionContext, Injectable, ForbiddenException } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  ForbiddenException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { AuthenticatedRequest } from '../types/authenticated-user';
 
 @Injectable()
 export class SubscriptionGuard implements CanActivate {
   constructor(private prisma: PrismaService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest();
+    const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const user = request.user; // JwtAuthGuard tarafından eklenmiş olmalı
 
     if (!user || !user.id) {
@@ -36,7 +42,10 @@ export class SubscriptionGuard implements CanActivate {
 
     // 1. Kullanıcının kendisi premium mu veya deneme süresi aktif mi?
     const userTrialActive = dbUser.trialEndsAt > now;
-    const userPremiumActive = dbUser.isPremium && dbUser.premiumExpiresAt && dbUser.premiumExpiresAt > now;
+    const userPremiumActive =
+      dbUser.isPremium &&
+      dbUser.premiumExpiresAt &&
+      dbUser.premiumExpiresAt > now;
 
     if (userTrialActive || userPremiumActive) {
       return true;
@@ -46,7 +55,10 @@ export class SubscriptionGuard implements CanActivate {
     for (const membership of dbUser.memberships) {
       const owner = membership.family.owner;
       const ownerTrialActive = owner.trialEndsAt > now;
-      const ownerPremiumActive = owner.isPremium && owner.premiumExpiresAt && owner.premiumExpiresAt > now;
+      const ownerPremiumActive =
+        owner.isPremium &&
+        owner.premiumExpiresAt &&
+        owner.premiumExpiresAt > now;
 
       if (ownerTrialActive || ownerPremiumActive) {
         return true;
@@ -56,7 +68,8 @@ export class SubscriptionGuard implements CanActivate {
     // Şartlar sağlanmıyorsa özel bir hata koduyla hata fırlat
     throw new ForbiddenException({
       statusCode: 403,
-      message: 'Uygulama kullanım süreniz dolmuştur. Devam etmek için lütfen premium üyelik alınız.',
+      message:
+        'Uygulama kullanım süreniz dolmuştur. Devam etmek için lütfen premium üyelik alınız.',
       error: 'TRIAL_EXPIRED',
     });
   }

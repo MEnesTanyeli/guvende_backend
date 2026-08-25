@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TriggerSosDto } from './dto/trigger-sos.dto';
 import { AlertType, AlertStatus } from '@prisma/client';
@@ -7,8 +11,10 @@ import { LocationsGateway } from '../locations/locations.gateway';
 
 function toTitleCase(str: string): string {
   if (!str) return '';
-  return str.toLowerCase().split(' ')
-    .map(w => {
+  return str
+    .toLowerCase()
+    .split(' ')
+    .map((w) => {
       if (!w) return '';
       let first = w.charAt(0);
       if (first === 'i') first = 'İ';
@@ -44,7 +50,9 @@ export class SosService {
     });
 
     if (memberships.length === 0) {
-      throw new BadRequestException('Herhangi bir aile grubuna üye değilsiniz. SOS tetiklenemez.');
+      throw new BadRequestException(
+        'Herhangi bir aile grubuna üye değilsiniz. SOS tetiklenemez.',
+      );
     }
 
     const sosEvents: any[] = [];
@@ -71,7 +79,7 @@ export class SosService {
       const displayName = toTitleCase(user.name);
       const alertMsg = `${displayName}: "${dto.message || 'Yardıma ihtiyacım var!'}" (Konum: ${dto.latitude}, ${dto.longitude})`;
 
-      const alert = await this.prisma.alert.create({
+      await this.prisma.alert.create({
         data: {
           familyId,
           userId,

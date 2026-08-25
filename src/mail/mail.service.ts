@@ -10,7 +10,9 @@ export class MailService {
   async sendWelcomeEmail(to: string, name: string): Promise<void> {
     const apiKey = this.configService.get<string>('BREVO_API_KEY');
     if (!apiKey) {
-      this.logger.warn('BREVO_API_KEY tanimli degil; hos geldiniz e-postasi atlandi.');
+      this.logger.warn(
+        'BREVO_API_KEY tanimli degil; hos geldiniz e-postasi atlandi.',
+      );
       return;
     }
 
@@ -55,14 +57,18 @@ export class MailService {
 
     if (!response.ok) {
       const body = await response.text();
-      throw new Error(`Brevo e-posta gonderimi basarisiz (${response.status}): ${body}`);
+      throw new Error(
+        `Brevo e-posta gonderimi basarisiz (${response.status}): ${body}`,
+      );
     }
   }
 
   async sendVerificationCodeEmail(to: string, code: string): Promise<void> {
     const apiKey = this.configService.get<string>('BREVO_API_KEY');
     if (!apiKey) {
-      this.logger.warn('BREVO_API_KEY tanimli degil; kayit dogrulama e-postasi atlandi.');
+      this.logger.warn(
+        'BREVO_API_KEY tanimli degil; kayit dogrulama e-postasi atlandi.',
+      );
       return;
     }
 
@@ -80,7 +86,7 @@ export class MailService {
           email: 'noreply@mail.guvende.app',
         },
         to: [{ email: to }],
-        subject: "G\u00fcvende E-posta Do\u011frulama Kodu",
+        subject: 'G\u00fcvende E-posta Do\u011frulama Kodu',
         htmlContent: `
           <!doctype html>
           <html lang="tr">
@@ -107,14 +113,18 @@ export class MailService {
 
     if (!response.ok) {
       const body = await response.text();
-      throw new Error(`Brevo e-posta gonderimi basarisiz (${response.status}): ${body}`);
+      throw new Error(
+        `Brevo e-posta gonderimi basarisiz (${response.status}): ${body}`,
+      );
     }
   }
 
   async sendResetPasswordEmail(to: string, code: string): Promise<void> {
     const apiKey = this.configService.get<string>('BREVO_API_KEY');
     if (!apiKey) {
-      this.logger.warn('BREVO_API_KEY tanimli degil; sifre sifirlama e-postasi atlandi.');
+      this.logger.warn(
+        'BREVO_API_KEY tanimli degil; sifre sifirlama e-postasi atlandi.',
+      );
       return;
     }
 
@@ -132,7 +142,7 @@ export class MailService {
           email: 'noreply@mail.guvende.app',
         },
         to: [{ email: to }],
-        subject: "G\u00fcvende \u015eifre S\u0131f\u0131rlama Kodu",
+        subject: 'G\u00fcvende \u015eifre S\u0131f\u0131rlama Kodu',
         htmlContent: `
           <!doctype html>
           <html lang="tr">
@@ -159,7 +169,9 @@ export class MailService {
 
     if (!response.ok) {
       const body = await response.text();
-      throw new Error(`Brevo e-posta gonderimi basarisiz (${response.status}): ${body}`);
+      throw new Error(
+        `Brevo e-posta gonderimi basarisiz (${response.status}): ${body}`,
+      );
     }
   }
 

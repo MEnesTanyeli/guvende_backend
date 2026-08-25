@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -29,11 +34,16 @@ export class UsersService {
 
     const now = new Date();
     const userTrialActive = user.trialEndsAt > now;
-    const userPremiumActive = user.isPremium && user.premiumExpiresAt && user.premiumExpiresAt > now;
-    
+    const userPremiumActive =
+      user.isPremium && user.premiumExpiresAt && user.premiumExpiresAt > now;
+
     let isPremiumByAssociation = userTrialActive || userPremiumActive;
-    let associatedPremiumExpiresAt: Date | null = userPremiumActive ? user.premiumExpiresAt : null;
-    let associatedTrialEndsAt: Date | null = userTrialActive ? user.trialEndsAt : null;
+    let associatedPremiumExpiresAt: Date | null = userPremiumActive
+      ? user.premiumExpiresAt
+      : null;
+    let associatedTrialEndsAt: Date | null = userTrialActive
+      ? user.trialEndsAt
+      : null;
 
     const proxyOwner = await this.prisma.user.findFirst({
       where: {
@@ -44,7 +54,10 @@ export class UsersService {
 
     if (!isPremiumByAssociation && proxyOwner) {
       const ownerTrialActive = proxyOwner.trialEndsAt > now;
-      const ownerPremiumActive = proxyOwner.isPremium && proxyOwner.premiumExpiresAt && proxyOwner.premiumExpiresAt > now;
+      const ownerPremiumActive =
+        proxyOwner.isPremium &&
+        proxyOwner.premiumExpiresAt &&
+        proxyOwner.premiumExpiresAt > now;
       if (ownerTrialActive || ownerPremiumActive) {
         isPremiumByAssociation = true;
         associatedPremiumExpiresAt = proxyOwner.premiumExpiresAt;
@@ -56,7 +69,10 @@ export class UsersService {
       for (const membership of user.memberships) {
         const owner = membership.family.owner;
         const ownerTrialActive = owner.trialEndsAt > now;
-        const ownerPremiumActive = owner.isPremium && owner.premiumExpiresAt && owner.premiumExpiresAt > now;
+        const ownerPremiumActive =
+          owner.isPremium &&
+          owner.premiumExpiresAt &&
+          owner.premiumExpiresAt > now;
         if (ownerTrialActive || ownerPremiumActive) {
           isPremiumByAssociation = true;
           associatedPremiumExpiresAt = owner.premiumExpiresAt;
@@ -82,14 +98,21 @@ export class UsersService {
       isGuardian,
       isInFamily,
       isProxy,
-      proxy: user.proxy ? { id: user.proxy.id, email: user.proxy.email, name: user.proxy.name } : null,
+      proxy: user.proxy
+        ? { id: user.proxy.id, email: user.proxy.email, name: user.proxy.name }
+        : null,
       isLocked: user.isLocked,
       devicePermissions: user.devicePermissions,
       createdAt: user.createdAt,
     };
   }
 
-  async updateProfile(id: string, name?: string, phone?: string, gender?: string) {
+  async updateProfile(
+    id: string,
+    name?: string,
+    phone?: string,
+    gender?: string,
+  ) {
     await this.prisma.user.update({
       where: { id },
       data: {
@@ -259,11 +282,15 @@ export class UsersService {
     });
 
     return {
-      message: 'Cihaz kilidi başarıyla kaldırıldı. Yeni cihazla giriş yapılabilir.',
+      message:
+        'Cihaz kilidi başarıyla kaldırıldı. Yeni cihazla giriş yapılabilir.',
     };
   }
 
-  async updateDevicePermissions(userId: string, permissions: any) {
+  async updateDevicePermissions(
+    userId: string,
+    permissions: Prisma.InputJsonObject,
+  ) {
     await this.prisma.user.update({
       where: { id: userId },
       data: { devicePermissions: permissions },

@@ -11,7 +11,10 @@ export class BatteryController {
   constructor(private batteryService: BatteryService) {}
 
   @Post()
-  async updateBattery(@GetUser('id') userId: string, @Body() dto: UpdateBatteryDto) {
+  async updateBattery(
+    @GetUser('id') userId: string,
+    @Body() dto: UpdateBatteryDto,
+  ) {
     return this.batteryService.updateBattery(userId, dto);
   }
 }

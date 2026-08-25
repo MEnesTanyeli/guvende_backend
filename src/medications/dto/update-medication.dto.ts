@@ -11,7 +11,9 @@ export class UpdateMedicationDto {
 
   @IsString()
   @IsOptional()
-  @Matches(/^[0-2][0-9]:[0-5][0-9]$/, { message: 'Saat formatı HH:MM olmalıdır.' })
+  @Matches(/^[0-2][0-9]:[0-5][0-9]$/, {
+    message: 'Saat formatı HH:MM olmalıdır.',
+  })
   time?: string;
 
   @IsString()

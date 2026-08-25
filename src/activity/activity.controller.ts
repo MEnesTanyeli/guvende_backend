@@ -1,4 +1,10 @@
-import { Controller, ForbiddenException, Get, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  ForbiddenException,
+  Get,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ActivityService } from './activity.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SubscriptionGuard } from '../auth/guards/subscription.guard';
@@ -17,9 +23,14 @@ export class ActivityController {
   ) {
     const targetUserId = memberId || userId;
     if (memberId && memberId !== userId) {
-      const hasAccess = await this.activityService.checkCommonFamily(userId, memberId);
+      const hasAccess = await this.activityService.checkCommonFamily(
+        userId,
+        memberId,
+      );
       if (!hasAccess) {
-        throw new ForbiddenException('Bu kullanıcının aktivite bilgilerini görmeye yetkiniz yok.');
+        throw new ForbiddenException(
+          'Bu kullanıcının aktivite bilgilerini görmeye yetkiniz yok.',
+        );
       }
     }
     return this.activityService.getDailyActivity(targetUserId, date);
