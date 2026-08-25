@@ -16,6 +16,35 @@ export class LocationsService {
     private notificationsService: NotificationsService,
   ) {}
 
+  private getIstanbulDateKey(date = new Date()): string {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Istanbul',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(date);
+
+    const year = parts.find((part) => part.type === 'year')?.value;
+    const month = parts.find((part) => part.type === 'month')?.value;
+    const day = parts.find((part) => part.type === 'day')?.value;
+
+    return `${year}-${month}-${day}`;
+  }
+
+  private getIstanbulDayRangeUtc(dateStr?: string): { startOfDay: Date; endOfDay: Date } {
+    const dateKey = dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)
+      ? dateStr
+      : this.getIstanbulDateKey();
+    const [year, month, day] = dateKey.split('-').map(Number);
+
+    const startMs = Date.UTC(year, month - 1, day, -3, 0, 0, 0);
+    const nextDayStartMs = Date.UTC(year, month - 1, day + 1, -3, 0, 0, 0);
+
+    return {
+      startOfDay: new Date(startMs),
+      endOfDay: new Date(nextDayStartMs - 1),
+    };
+  }
   // Mesafe hesabı için Haversine Formülü (metre cinsinden döndürür)
   private getDistanceInMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
     const R = 6371000; // Dünya yarıçapı (metre)
@@ -571,10 +600,8 @@ export class LocationsService {
       throw new NotFoundException('Hedef kullanıcı bu aile grubunda bulunamadı.');
     }
 
-    // Tarih aralığını belirle
-    const date = dateStr ? new Date(dateStr) : new Date();
-    const startOfDay = new Date(date.setHours(0, 0, 0, 0));
-    const endOfDay = new Date(date.setHours(23, 59, 59, 999));
+    // Tarih araligini Turkiye gunune gore UTC olarak belirle.
+    const { startOfDay, endOfDay } = this.getIstanbulDayRangeUtc(dateStr);
 
     return this.prisma.location.findMany({
       where: {
@@ -730,10 +757,7 @@ export class LocationsService {
       throw new NotFoundException('Hedef kullanıcı bu aile grubunda bulunamadı.');
     }
 
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
+    const { startOfDay, endOfDay } = this.getIstanbulDayRangeUtc();
 
     return this.prisma.location.deleteMany({
       where: {
