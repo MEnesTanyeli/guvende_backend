@@ -1,9 +1,36 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
+interface AppUsageSnapshotItem {
+  packageName: string;
+  appName: string;
+  durationMin: number;
+}
+
 @Injectable()
 export class AppUsageService {
   constructor(private prisma: PrismaService) {}
+
+  private getIstanbulDateKey(date = new Date()): string {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Istanbul',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(date);
+    const get = (type: string) =>
+      parts.find((part) => part.type === type)?.value;
+    return `${get('year')}-${get('month')}-${get('day')}`;
+  }
+
+  private getIstanbulDayStartUtc(dateStr?: string): Date {
+    const dateKey =
+      dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)
+        ? dateStr
+        : this.getIstanbulDateKey();
+    const [year, month, day] = dateKey.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day, -3, 0, 0, 0));
+  }
 
   async checkCommonFamily(
     userId: string,
@@ -15,7 +42,7 @@ export class AppUsageService {
         family: {
           members: {
             some: {
-              userId: userId,
+              userId,
             },
           },
         },
@@ -26,90 +53,63 @@ export class AppUsageService {
 
   async saveAppUsage(
     userId: string,
-    usages: Array<{
-      packageName: string;
-      appName: string;
-      durationMin: number;
-    }>,
+    usages: AppUsageSnapshotItem[],
     recordedDateStr?: string,
   ) {
-    const startOfToday = recordedDateStr
-      ? new Date(recordedDateStr)
-      : new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-
-    // 1. O güne ait mevcut kayıtları tek seferde çek (select yükünü minimize et)
-    const existingUsages = await this.prisma.appUsage.findMany({
-      where: {
-        userId,
-        recordedDate: startOfToday,
-      },
-    });
-
-    const existingMap = new Map(existingUsages.map((u) => [u.packageName, u]));
-
-    const toCreate: Array<{
-      userId: string;
-      packageName: string;
-      appName: string;
-      durationMin: number;
-      recordedDate: Date;
-      lastUsedAt: Date;
-    }> = [];
-
-    const toUpdate: Array<{
-      id: string;
-      durationMin: number;
-      appName: string;
-    }> = [];
-
-    // 2. Bellekte karşılaştır ve sadece değişen/yeni verileri belirle
-    for (const usage of usages) {
-      const existing = existingMap.get(usage.packageName);
-      if (existing) {
-        // Süre değiştiyse veya adı güncellendiyse listeye ekle
-        if (existing.durationMin !== usage.durationMin) {
-          toUpdate.push({
-            id: existing.id,
-            durationMin: usage.durationMin,
-            appName: usage.appName,
-          });
-        }
-      } else {
-        toCreate.push({
-          userId,
-          packageName: usage.packageName,
-          appName: usage.appName,
-          durationMin: usage.durationMin,
-          recordedDate: startOfToday,
-          lastUsedAt: new Date(),
-        });
-      }
-    }
-
-    // 3. Toplu sorguları çalıştır (veritabanı transaction yükünü azalt)
-    if (toCreate.length > 0) {
-      await this.prisma.appUsage.createMany({
-        data: toCreate,
-      });
-    }
-
-    if (toUpdate.length > 0) {
-      await Promise.all(
-        toUpdate.map((u) =>
-          this.prisma.appUsage.update({
-            where: { id: u.id },
-            data: {
-              durationMin: u.durationMin,
-              appName: u.appName,
-              lastUsedAt: new Date(),
-            },
-          }),
-        ),
+    const recordedDate = this.getIstanbulDayStartUtc(recordedDateStr);
+    const now = new Date();
+    const normalizedUsages = usages
+      .map((usage) => ({
+        packageName: usage.packageName.trim(),
+        appName: usage.appName.trim(),
+        durationMin: usage.durationMin,
+      }))
+      .filter(
+        (usage) =>
+          usage.packageName.length > 0 &&
+          usage.appName.length > 0 &&
+          usage.durationMin > 0,
       );
-    }
 
-    return { success: true };
+    const packageNames = normalizedUsages.map((usage) => usage.packageName);
+
+    await this.prisma.$transaction([
+      this.prisma.appUsage.deleteMany({
+        where: {
+          userId,
+          recordedDate,
+          ...(packageNames.length > 0
+            ? { packageName: { notIn: packageNames } }
+            : {}),
+        },
+      }),
+      ...normalizedUsages.map((usage) =>
+        this.prisma.appUsage.upsert({
+          where: {
+            userId_packageName_recordedDate: {
+              userId,
+              packageName: usage.packageName,
+              recordedDate,
+            },
+          },
+          create: {
+            userId,
+            packageName: usage.packageName,
+            appName: usage.appName,
+            durationMin: usage.durationMin,
+            recordedDate,
+            lastUsedAt: now,
+          },
+          update: {
+            appName: usage.appName,
+            durationMin: usage.durationMin,
+            lastUsedAt: now,
+          },
+        }),
+      ),
+    ]);
+
+    return { success: true, count: normalizedUsages.length };
   }
 
   async getMemberAppUsage(userId: string, targetUserId: string) {
@@ -122,13 +122,10 @@ export class AppUsageService {
       }
     }
 
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-
     return this.prisma.appUsage.findMany({
       where: {
         userId: targetUserId,
-        recordedDate: startOfToday,
+        recordedDate: this.getIstanbulDayStartUtc(),
       },
       orderBy: {
         durationMin: 'desc',
