@@ -512,7 +512,7 @@ export class CronService {
   // Süresi uzun zaman önce dolmuş session kayıtlarını her gece temizle.
   // Yakın tarihli iptal kayıtları refresh-token tekrar kullanımını tespit etmek için korunur.
   // Clean resolved alerts after five days during the nightly maintenance window.
-  @Cron('0 0 3 * * *')
+  @Cron('0 0 3 * * *', { timeZone: 'Europe/Istanbul' })
   async handleResolvedAlertsCleanup() {
     const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
 
