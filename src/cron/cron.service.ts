@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
-import { AlertType, MemberType } from '@prisma/client';
+import { AlertStatus, AlertType, MemberType } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 import { LocationsGateway } from '../locations/locations.gateway';
 
@@ -511,6 +511,29 @@ export class CronService {
 
   // Süresi uzun zaman önce dolmuş session kayıtlarını her gece temizle.
   // Yakın tarihli iptal kayıtları refresh-token tekrar kullanımını tespit etmek için korunur.
+  // Clean resolved alerts after five days during the nightly maintenance window.
+  @Cron('0 0 3 * * *')
+  async handleResolvedAlertsCleanup() {
+    const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+
+    try {
+      const deleteResult = await this.prisma.alert.deleteMany({
+        where: {
+          status: AlertStatus.resolved,
+          resolvedAt: { lt: fiveDaysAgo },
+        },
+      });
+
+      this.logger.log(
+        `Resolved alert cleanup completed. Deleted records: ${deleteResult.count}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Resolved alerts cleanup failed: ${this.getErrorMessage(error)}`,
+      );
+    }
+  }
+
   @Cron('0 30 3 * * *')
   async handleSessionsCleanup() {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
