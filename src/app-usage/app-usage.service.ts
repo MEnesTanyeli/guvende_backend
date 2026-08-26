@@ -1,4 +1,5 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
+import { MemberType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 interface AppUsageSnapshotItem {
@@ -10,6 +11,17 @@ interface AppUsageSnapshotItem {
 @Injectable()
 export class AppUsageService {
   constructor(private prisma: PrismaService) {}
+
+  private isTrackableMember(member: {
+    memberType: MemberType;
+    guardianTrackingEnabled: boolean;
+  }): boolean {
+    return (
+      member.memberType === MemberType.child ||
+      member.memberType === MemberType.elder ||
+      member.guardianTrackingEnabled
+    );
+  }
 
   private getIstanbulDateKey(date = new Date()): string {
     const parts = new Intl.DateTimeFormat('en-CA', {
@@ -48,7 +60,7 @@ export class AppUsageService {
         },
       },
     });
-    return !!common;
+    return !!common && this.isTrackableMember(common);
   }
 
   async saveAppUsage(

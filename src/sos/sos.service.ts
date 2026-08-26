@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TriggerSosDto } from './dto/trigger-sos.dto';
-import { AlertType, AlertStatus } from '@prisma/client';
+import { AlertType } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 import { LocationsGateway } from '../locations/locations.gateway';
 
@@ -79,37 +79,26 @@ export class SosService {
       const displayName = toTitleCase(user.name);
       const alertMsg = `${displayName}: "${dto.message || 'Yardıma ihtiyacım var!'}" (Konum: ${dto.latitude}, ${dto.longitude})`;
 
-      await this.prisma.alert.create({
-        data: {
-          familyId,
-          userId,
-          type: AlertType.sos,
-          title: alertTitle,
-          message: alertMsg,
-          status: AlertStatus.active,
-          metadata: {
-            latitude: dto.latitude,
-            longitude: dto.longitude,
-            sosEventId: sosEvent.id,
-            message: dto.message,
-          },
-        },
-      });
-
-      // Ailedeki diğer üyelere anlık bildirim (FCM) gönder
-      await this.notificationsService.sendFamilyNotification(
+      await this.notificationsService.raiseFamilyAlert({
         familyId,
         userId,
-        alertTitle,
-        alertMsg,
-        {
+        type: AlertType.sos,
+        title: alertTitle,
+        message: alertMsg,
+        metadata: {
+          latitude: dto.latitude,
+          longitude: dto.longitude,
+          sosEventId: sosEvent.id,
+          message: dto.message,
+        },
+        notificationData: {
           type: 'sos',
           userId,
           latitude: dto.latitude,
           longitude: dto.longitude,
           sosEventId: sosEvent.id,
         },
-      );
+      });
 
       // WebSocket ile anlık odadaki üyelere duyur
       this.locationsGateway.sendLocationUpdate(familyId, {

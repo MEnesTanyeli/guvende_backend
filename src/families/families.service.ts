@@ -7,7 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateFamilyDto } from './dto/create-family.dto';
 import { JoinFamilyDto } from './dto/join-family.dto';
-import { MemberType, Prisma } from '@prisma/client';
+import { AlertType, MemberType, Prisma } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
@@ -150,6 +150,7 @@ export class FamiliesService {
           select: {
             muteNotifications: true,
             memberType: true,
+            guardianTrackingEnabled: true,
           },
         },
         _count: {
@@ -432,6 +433,7 @@ export class FamiliesService {
       },
       data: {
         memberType: newRole as MemberType,
+        guardianTrackingEnabled: false,
       },
       include: {
         user: {
@@ -485,34 +487,17 @@ export class FamiliesService {
       membership.memberType === MemberType.child ||
       membership.memberType === MemberType.elder
     ) {
-      const remainingGuardians = family.members.filter(
-        (m) => m.memberType === MemberType.guardian && m.userId !== userId,
-      );
       const alertTitle = 'UYARI: GRUPTAN AYRILMA';
-      const alertMsg = `${membership.user.name} aile grubundan kendi isteğiyle ayrıldı ve konum takibi sonlandırıldı!`;
+      const alertMsg = `${membership.user.name} aile grubundan kendi istegiyle ayrildi ve konum takibi sonlandirildi!`;
 
-      // Her veli için veritabanında alarm oluştur
-      for (let index = 0; index < remainingGuardians.length; index += 1) {
-        await this.prisma.alert.create({
-          data: {
-            familyId,
-            userId,
-            type: 'family_leave',
-            title: alertTitle,
-            message: alertMsg,
-            status: 'active',
-          },
-        });
-      }
-
-      // Kalan velilere push/socket bildirimi gönder
-      await this.notificationsService.sendFamilyNotification(
+      await this.notificationsService.raiseFamilyAlert({
         familyId,
         userId,
-        alertTitle,
-        alertMsg,
-        { type: 'family_leave', userId },
-      );
+        type: AlertType.family_leave,
+        title: alertTitle,
+        message: alertMsg,
+        notificationData: { type: 'family_leave', userId },
+      });
     }
 
     // Üyelik kaydını sil
@@ -584,26 +569,14 @@ export class FamiliesService {
       const alertTitle = 'UYARI: GRUPTAN ÇIKARILDI';
       const alertMsg = `${targetMembership.user.name}, veli tarafından aile grubundan çıkarıldı ve konum takibi sonlandırıldı!`;
 
-      // Alarmı veritabanına kaydet
-      await this.prisma.alert.create({
-        data: {
-          familyId,
-          userId: targetUserId,
-          type: 'family_leave',
-          title: alertTitle,
-          message: alertMsg,
-          status: 'active',
-        },
-      });
-
-      // Kalan velilere bildirim gönder
-      await this.notificationsService.sendFamilyNotification(
+      await this.notificationsService.raiseFamilyAlert({
         familyId,
-        targetUserId,
-        alertTitle,
-        alertMsg,
-        { type: 'family_leave', userId: targetUserId },
-      );
+        userId: targetUserId,
+        type: AlertType.family_leave,
+        title: alertTitle,
+        message: alertMsg,
+        notificationData: { type: 'family_leave', userId: targetUserId },
+      });
     }
 
     // Üyelik kaydını sil
@@ -667,6 +640,43 @@ export class FamiliesService {
       },
       data: {
         muteNotifications: mute,
+      },
+    });
+  }
+
+  async updateOwnTracking(
+    userId: string,
+    familyId: string,
+    enabled: boolean,
+  ) {
+    const membership = await this.prisma.familyMember.findUnique({
+      where: {
+        familyId_userId: {
+          familyId,
+          userId,
+        },
+      },
+    });
+
+    if (!membership) {
+      throw new NotFoundException('Bu aile grubunun uyesi degilsiniz.');
+    }
+
+    if (membership.memberType !== MemberType.guardian) {
+      throw new ForbiddenException(
+        'Cocuk ve yasli uyelerde takip ayari kapatilamaz.',
+      );
+    }
+
+    return this.prisma.familyMember.update({
+      where: {
+        familyId_userId: {
+          familyId,
+          userId,
+        },
+      },
+      data: {
+        guardianTrackingEnabled: enabled,
       },
     });
   }

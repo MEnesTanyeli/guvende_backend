@@ -8,7 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RecordLocationDto } from './dto/record-location.dto';
 import { RecordBulkLocationsDto } from './dto/record-bulk-locations.dto';
 import { LocationsGateway } from './locations.gateway';
-import { AlertType, AlertStatus, MemberType } from '@prisma/client';
+import { AlertType, MemberType } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
@@ -74,6 +74,17 @@ export class LocationsService {
     return R * c;
   }
 
+  private isTrackableMember(member: {
+    memberType: MemberType;
+    guardianTrackingEnabled: boolean;
+  }): boolean {
+    return (
+      member.memberType === MemberType.child ||
+      member.memberType === MemberType.elder ||
+      member.guardianTrackingEnabled
+    );
+  }
+
   async recordLocation(userId: string, dto: RecordLocationDto) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -120,26 +131,26 @@ export class LocationsService {
     });
 
     // Kullanıcının bağlantısı geri geldiği için varsa eski "connection_lost" alarmlarını çözümlenmişe çek
-    await this.prisma.alert.updateMany({
-      where: {
-        userId,
-        type: AlertType.connection_lost,
-        status: AlertStatus.active,
-      },
-      data: {
-        status: AlertStatus.resolved,
-        resolvedAt: new Date(),
-      },
-    });
+    await this.notificationsService.resolveActiveAlerts(
+      userId,
+      AlertType.connection_lost,
+    );
 
     // Kullanıcının üye olduğu aile gruplarını bul
     const memberships = await this.prisma.familyMember.findMany({
       where: { userId },
-      select: { familyId: true },
+      select: {
+        familyId: true,
+        memberType: true,
+        guardianTrackingEnabled: true,
+      },
     });
+    const trackableMemberships = memberships.filter((membership) =>
+      this.isTrackableMember(membership),
+    );
 
     // Her aile grubu için kontroller ve websocket yayını
-    for (const membership of memberships) {
+    for (const membership of trackableMemberships) {
       const familyId = membership.familyId;
 
       // 1. Güvenli Bölge Giriş / Çıkış Kontrolleri
@@ -193,29 +204,22 @@ export class LocationsService {
           const alertTitle = 'Güvenli Bölgeye Giriş';
           const alertMsg = `${user.name}, "${zone.name}" güvenli bölgesine giriş yaptı.`;
 
-          await this.prisma.alert.create({
-            data: {
-              familyId,
+          await this.notificationsService.raiseFamilyAlert({
+            familyId,
+            userId,
+            type: AlertType.safe_zone_enter,
+            title: alertTitle,
+            message: alertMsg,
+            metadata: { safeZoneId: zone.id, safeZoneName: zone.name },
+            notificationData: {
+              type: 'safe_zone_enter',
               userId,
-              type: AlertType.safe_zone_enter,
-              title: alertTitle,
-              message: alertMsg,
-              metadata: { safeZoneId: zone.id, safeZoneName: zone.name },
+              zoneId: zone.id,
             },
+            delivery: isStale ? 'none' : 'family',
           });
 
           alertTriggered = true;
-
-          // Eğer eski veri değilse anlık push bildirim gönder
-          if (!isStale) {
-            await this.notificationsService.sendFamilyNotification(
-              familyId,
-              userId,
-              alertTitle,
-              alertMsg,
-              { type: 'safe_zone_enter', userId, zoneId: zone.id },
-            );
-          }
         }
       }
 
@@ -255,29 +259,22 @@ export class LocationsService {
             const alertTitle = 'Güvenli Bölgeden Çıkış';
             const alertMsg = `${user.name}, "${zone.name}" güvenli bölgesinden çıkış yaptı!`;
 
-            await this.prisma.alert.create({
-              data: {
-                familyId,
+            await this.notificationsService.raiseFamilyAlert({
+              familyId,
+              userId,
+              type: AlertType.safe_zone_exit,
+              title: alertTitle,
+              message: alertMsg,
+              metadata: { safeZoneId: zone.id, safeZoneName: zone.name },
+              notificationData: {
+                type: 'safe_zone_exit',
                 userId,
-                type: AlertType.safe_zone_exit,
-                title: alertTitle,
-                message: alertMsg,
-                metadata: { safeZoneId: zone.id, safeZoneName: zone.name },
+                zoneId: zone.id,
               },
+              delivery: isStale ? 'none' : 'family',
             });
 
             alertTriggered = true;
-
-            // Eğer eski veri değilse anlık push bildirim gönder
-            if (!isStale) {
-              await this.notificationsService.sendFamilyNotification(
-                familyId,
-                userId,
-                alertTitle,
-                alertMsg,
-                { type: 'safe_zone_exit', userId, zoneId: zone.id },
-              );
-            }
           }
         }
       }
@@ -309,28 +306,23 @@ export class LocationsService {
           const alertTitle = 'Güvenli Bölgeden Çıkış';
           const alertMsg = `${user.name}, "${lastZoneName}" güvenli bölgesinden çıkış yaptı!`;
 
-          await this.prisma.alert.create({
-            data: {
-              familyId,
-              userId,
-              type: AlertType.safe_zone_exit,
-              title: alertTitle,
-              message: alertMsg,
-              metadata: {
-                safeZoneId: lastZoneId,
-                safeZoneName: lastZoneName,
-                delayedTrigger: true,
-              },
-            },
-          });
-
-          await this.notificationsService.sendFamilyNotification(
+          await this.notificationsService.raiseFamilyAlert({
             familyId,
             userId,
-            alertTitle,
-            alertMsg,
-            { type: 'safe_zone_exit', userId, zoneId: lastZoneId },
-          );
+            type: AlertType.safe_zone_exit,
+            title: alertTitle,
+            message: alertMsg,
+            metadata: {
+              safeZoneId: lastZoneId,
+              safeZoneName: lastZoneName,
+              delayedTrigger: true,
+            },
+            notificationData: {
+              type: 'safe_zone_exit',
+              userId,
+              zoneId: lastZoneId,
+            },
+          });
         }
         // Velinin bildiği son durum dışarıdaydı (veya yoktu), ama çocuk şu an bir bölgenin içinde
         else if (
@@ -343,28 +335,23 @@ export class LocationsService {
             const alertTitle = 'Güvenli Bölgeye Giriş';
             const alertMsg = `${user.name}, "${zone.name}" güvenli bölgesine giriş yaptı.`;
 
-            await this.prisma.alert.create({
-              data: {
-                familyId,
-                userId,
-                type: AlertType.safe_zone_enter,
-                title: alertTitle,
-                message: alertMsg,
-                metadata: {
-                  safeZoneId: zone.id,
-                  safeZoneName: zone.name,
-                  delayedTrigger: true,
-                },
-              },
-            });
-
-            await this.notificationsService.sendFamilyNotification(
+            await this.notificationsService.raiseFamilyAlert({
               familyId,
               userId,
-              alertTitle,
-              alertMsg,
-              { type: 'safe_zone_enter', userId, zoneId: zone.id },
-            );
+              type: AlertType.safe_zone_enter,
+              title: alertTitle,
+              message: alertMsg,
+              metadata: {
+                safeZoneId: zone.id,
+                safeZoneName: zone.name,
+                delayedTrigger: true,
+              },
+              notificationData: {
+                type: 'safe_zone_enter',
+                userId,
+                zoneId: zone.id,
+              },
+            });
           }
         }
       }
@@ -380,57 +367,31 @@ export class LocationsService {
     // 3. Düşük Şarj Kontrolleri
     if (dto.batteryLevel !== undefined) {
       if (dto.batteryLevel <= 15 && !dto.isCharging) {
-        // Zaten aktif bir düşük şarj uyarısı var mı?
-        const activeBatteryAlert = await this.prisma.alert.findFirst({
-          where: {
+        const alertTitle = 'Dusuk Sarj Uyarisi';
+        const alertMsg = `${user.name} adli aile uyesinin sarji %${dto.batteryLevel} seviyesine dustu!`;
+
+        await this.notificationsService.raiseUserAlertForFamilies({
+          familyIds: trackableMemberships.map(
+            (membership) => membership.familyId,
+          ),
+          userId,
+          type: AlertType.low_battery,
+          title: alertTitle,
+          message: alertMsg,
+          metadata: { batteryLevel: dto.batteryLevel },
+          notificationData: {
+            type: 'low_battery',
             userId,
-            type: AlertType.low_battery,
-            status: AlertStatus.active,
+            batteryLevel: dto.batteryLevel,
           },
+          delivery: isStale ? 'none' : 'family',
+          dedupeActiveByUser: true,
         });
-
-        if (!activeBatteryAlert) {
-          const alertTitle = 'Düşük Şarj Uyarısı';
-          const alertMsg = `${user.name} adlı aile üyesinin şarjı %${dto.batteryLevel} seviyesine düştü!`;
-
-          // Her üye olduğu aile grubu için ayrı ayrı alarm oluştur
-          for (const membership of memberships) {
-            await this.prisma.alert.create({
-              data: {
-                familyId: membership.familyId,
-                userId,
-                type: AlertType.low_battery,
-                title: alertTitle,
-                message: alertMsg,
-                metadata: { batteryLevel: dto.batteryLevel },
-              },
-            });
-
-            // Eğer eski veri değilse anlık push bildirim gönder
-            if (!isStale) {
-              await this.notificationsService.sendFamilyNotification(
-                membership.familyId,
-                userId,
-                alertTitle,
-                alertMsg,
-                { type: 'low_battery', userId, batteryLevel: dto.batteryLevel },
-              );
-            }
-          }
-        }
       } else if (dto.batteryLevel > 15 || dto.isCharging) {
-        // Aktif düşük şarj alarmlarını çözümlendi olarak işaretle
-        await this.prisma.alert.updateMany({
-          where: {
-            userId,
-            type: AlertType.low_battery,
-            status: AlertStatus.active,
-          },
-          data: {
-            status: AlertStatus.resolved,
-            resolvedAt: new Date(),
-          },
-        });
+        await this.notificationsService.resolveActiveAlerts(
+          userId,
+          AlertType.low_battery,
+        );
       }
     }
 
@@ -558,7 +519,17 @@ export class LocationsService {
 
     // Ailedeki tüm üyeleri çek
     const members = await this.prisma.familyMember.findMany({
-      where: { familyId },
+      where: {
+        familyId,
+        OR: [
+          { userId },
+          { memberType: { in: [MemberType.child, MemberType.elder] } },
+          {
+            memberType: MemberType.guardian,
+            guardianTrackingEnabled: true,
+          },
+        ],
+      },
       select: { userId: true },
     });
 
@@ -640,6 +611,16 @@ export class LocationsService {
     if (!targetMember) {
       throw new NotFoundException(
         'Hedef kullanıcı bu aile grubunda bulunamadı.',
+      );
+    }
+
+    if (
+      userId !== targetUserId &&
+      (isMember.memberType !== MemberType.guardian ||
+        !this.isTrackableMember(targetMember))
+    ) {
+      throw new ForbiddenException(
+        'Bu uyenin takip verilerine erisim yetkiniz yok.',
       );
     }
 
@@ -756,25 +737,15 @@ export class LocationsService {
       const alertTitle = '⚠️ Sesli Uyarı Yanıtsız Kaldı!';
       const alertMsg = `${child?.name || 'Çocuğunuz'} gönderilen acil sesli uyarıyı 60 saniye boyunca kapatmadı! Acil durum olabilir.`;
 
-      await this.prisma.alert.create({
-        data: {
-          familyId: sharedMembership.familyId,
-          userId: childId,
-          type: 'sos',
-          title: alertTitle,
-          message: alertMsg,
-          metadata: { senderId },
-        },
+      await this.notificationsService.raiseFamilyAlert({
+        familyId: sharedMembership.familyId,
+        userId: childId,
+        type: AlertType.sos,
+        title: alertTitle,
+        message: alertMsg,
+        metadata: { senderId },
+        notificationData: { action: 'audible_warning_unanswered', childId },
       });
-
-      // Ailedeki tüm velilere push bildirim gönder
-      await this.notificationsService.sendFamilyNotification(
-        sharedMembership.familyId,
-        childId,
-        alertTitle,
-        alertMsg,
-        { action: 'audible_warning_unanswered', childId },
-      );
     }
 
     return { success: true };

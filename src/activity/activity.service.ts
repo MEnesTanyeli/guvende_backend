@@ -1,9 +1,21 @@
 import { Injectable } from '@nestjs/common';
+import { MemberType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class ActivityService {
   constructor(private prisma: PrismaService) {}
+
+  private isTrackableMember(member: {
+    memberType: MemberType;
+    guardianTrackingEnabled: boolean;
+  }): boolean {
+    return (
+      member.memberType === MemberType.child ||
+      member.memberType === MemberType.elder ||
+      member.guardianTrackingEnabled
+    );
+  }
 
   // İki koordinat arası Haversine mesafe hesabı (metre cinsinden)
   private getDistanceInMeters(
@@ -144,6 +156,6 @@ export class ActivityService {
         },
       },
     });
-    return !!common;
+    return !!common && this.isTrackableMember(common);
   }
 }

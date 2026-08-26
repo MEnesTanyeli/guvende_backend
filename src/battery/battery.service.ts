@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateBatteryDto } from './dto/update-battery.dto';
-import { AlertStatus, AlertType } from '@prisma/client';
+import { AlertType, MemberType } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
@@ -14,6 +14,17 @@ export class BatteryService {
     private prisma: PrismaService,
     private notificationsService: NotificationsService,
   ) {}
+
+  private isTrackableMember(member: {
+    memberType: MemberType;
+    guardianTrackingEnabled: boolean;
+  }): boolean {
+    return (
+      member.memberType === MemberType.child ||
+      member.memberType === MemberType.elder ||
+      member.guardianTrackingEnabled
+    );
+  }
 
   async updateBattery(userId: string, dto: UpdateBatteryDto) {
     const user = await this.prisma.user.findUnique({
@@ -54,57 +65,42 @@ export class BatteryService {
     // Üye olunan aileleri bul
     const memberships = await this.prisma.familyMember.findMany({
       where: { userId },
-      select: { familyId: true },
+      select: {
+        familyId: true,
+        memberType: true,
+        guardianTrackingEnabled: true,
+      },
     });
+    const trackableMemberships = memberships.filter((membership) =>
+      this.isTrackableMember(membership),
+    );
 
-    // Düşük şarj kontrolleri
+    // Dusuk sarj kontrolleri
     if (dto.batteryLevel <= 15 && !dto.isCharging) {
-      const activeAlert = await this.prisma.alert.findFirst({
-        where: {
+      const alertTitle = 'Dusuk Sarj Uyarisi';
+      const alertMsg = `${user.name} adli aile uyesinin sarji %${dto.batteryLevel} seviyesine dustu!`;
+
+        await this.notificationsService.raiseUserAlertForFamilies({
+        familyIds: trackableMemberships.map(
+          (membership) => membership.familyId,
+        ),
+        userId,
+        type: AlertType.low_battery,
+        title: alertTitle,
+        message: alertMsg,
+        metadata: { batteryLevel: dto.batteryLevel },
+        notificationData: {
+          type: 'low_battery',
           userId,
-          type: AlertType.low_battery,
-          status: AlertStatus.active,
+          batteryLevel: dto.batteryLevel,
         },
+        dedupeActiveByUser: true,
       });
-
-      if (!activeAlert) {
-        const alertTitle = 'Düşük Şarj Uyarısı';
-        const alertMsg = `${user.name} adlı aile üyesinin şarjı %${dto.batteryLevel} seviyesine düştü!`;
-
-        for (const membership of memberships) {
-          await this.prisma.alert.create({
-            data: {
-              familyId: membership.familyId,
-              userId,
-              type: AlertType.low_battery,
-              title: alertTitle,
-              message: alertMsg,
-              metadata: { batteryLevel: dto.batteryLevel },
-            },
-          });
-
-          await this.notificationsService.sendFamilyNotification(
-            membership.familyId,
-            userId,
-            alertTitle,
-            alertMsg,
-            { type: 'low_battery', userId, batteryLevel: dto.batteryLevel },
-          );
-        }
-      }
     } else if (dto.batteryLevel > 15 || dto.isCharging) {
-      // Aktif düşük şarj alarmlarını çöz
-      await this.prisma.alert.updateMany({
-        where: {
-          userId,
-          type: AlertType.low_battery,
-          status: AlertStatus.active,
-        },
-        data: {
-          status: AlertStatus.resolved,
-          resolvedAt: new Date(),
-        },
-      });
+      await this.notificationsService.resolveActiveAlerts(
+        userId,
+        AlertType.low_battery,
+      );
     }
 
     return {

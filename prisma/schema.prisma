@@ -112,15 +112,16 @@ model Family {
 }
 
 model FamilyMember {
-  id                String     @id @default(uuid())
-  familyId          String
-  family            Family     @relation(fields: [familyId], references: [id], onDelete: Cascade)
-  userId            String
-  user              User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  memberType        MemberType @default(child)
-  permissions       String[]   @default([])
-  muteNotifications Boolean    @default(false)
-  createdAt         DateTime   @default(now())
+  id                      String     @id @default(uuid())
+  familyId                String
+  family                  Family     @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  userId                  String
+  user                    User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  memberType              MemberType @default(child)
+  permissions             String[]   @default([])
+  muteNotifications       Boolean    @default(false)
+  guardianTrackingEnabled Boolean    @default(false)
+  createdAt               DateTime   @default(now())
 
   @@unique([familyId, userId])
   @@map("family_members")
@@ -256,12 +257,12 @@ model EmailVerification {
 model AdminAuditLog {
   id        String   @id @default(uuid())
   adminId   String
-  action    String   // "USER_DELETE", "ROLE_CHANGE", "FAMILY_DELETE", "ALERT_RESOLVE", "DEVICE_RESET", "PREMIUM_TOGGLE"
+  action    String // "USER_DELETE", "ROLE_CHANGE", "FAMILY_DELETE", "ALERT_RESOLVE", "DEVICE_RESET", "PREMIUM_TOGGLE"
   targetId  String
   details   Json
   createdAt DateTime @default(now())
 
-  admin     User     @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  admin User @relation(fields: [adminId], references: [id], onDelete: Cascade)
 
   @@map("admin_audit_logs")
 }

@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
-import { AlertStatus, AlertType } from '@prisma/client';
+import { AlertType, MemberType } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 import { LocationsGateway } from '../locations/locations.gateway';
 
@@ -43,6 +43,56 @@ export class CronService {
     return R * c;
   }
 
+  private getIstanbulHour(date = new Date()): number {
+    const hour = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Europe/Istanbul',
+      hour: '2-digit',
+      hour12: false,
+    }).format(date);
+
+    return Number(hour);
+  }
+
+  private isInInactivityQuietHours(date = new Date()): boolean {
+    const hour = this.getIstanbulHour(date);
+    return hour >= 0 && hour < 8;
+  }
+
+  private async getInactivityAlertFamilyIds(
+    familyIds: string[],
+    latitude: number,
+    longitude: number,
+  ): Promise<string[]> {
+    const eligibleFamilyIds: string[] = [];
+
+    for (const familyId of familyIds) {
+      const safeZones = await this.prisma.safeZone.findMany({
+        where: { familyId },
+        select: {
+          latitude: true,
+          longitude: true,
+          radius: true,
+        },
+      });
+
+      const isInsideSafeZone = safeZones.some((zone) => {
+        const distance = this.getDistanceInMeters(
+          latitude,
+          longitude,
+          zone.latitude,
+          zone.longitude,
+        );
+        return distance <= zone.radius;
+      });
+
+      if (!isInsideSafeZone) {
+        eligibleFamilyIds.push(familyId);
+      }
+    }
+
+    return eligibleFamilyIds;
+  }
+
   // 1. Bağlantı Kesildi Kontrolü (Her 2 dakikada bir çalışır)
   @Cron('0 */2 * * * *')
   async handleConnectionLostCheck() {
@@ -50,10 +100,19 @@ export class CronService {
       'Bağlantı kesildi kontrolü zamanlanmış görevi başlatılıyor...',
     );
 
-    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
 
     // Aile grubunda üye olan tüm benzersiz kullanıcıları bul
     const activeMembers = await this.prisma.familyMember.findMany({
+      where: {
+        OR: [
+          { memberType: { in: [MemberType.child, MemberType.elder] } },
+          {
+            memberType: MemberType.guardian,
+            guardianTrackingEnabled: true,
+          },
+        ],
+      },
       select: { userId: true, familyId: true },
     });
 
@@ -81,8 +140,8 @@ export class CronService {
 
       const userName = user ? user.name : 'Bilinmeyen Üye';
 
-      // Eğer en son konum kaydı varsa ve son konum kaydı 10 dakikadan daha eski ise
-      if (lastLocation && lastLocation.recordedAt < tenMinutesAgo) {
+      // Gorunur baglanti uyarisi 15 dakikalik kopmadan sonra uretilir.
+      if (lastLocation && lastLocation.recordedAt < fifteenMinutesAgo) {
         // Cihazın veritabanındaki durumunu çevrimdışına çek (stale connection temizliği)
         if (lastLocation.connectionStatus !== 'offline') {
           await this.prisma.location.update({
@@ -94,43 +153,25 @@ export class CronService {
           );
         }
 
-        // Zaten aktif/çözülmemiş bir bağlantı koptu uyarısı var mı?
-        const activeAlert = await this.prisma.alert.findFirst({
-          where: {
-            userId,
-            type: AlertType.connection_lost,
-            status: AlertStatus.active,
+        const alertTitle = 'Baglanti Kesildi';
+        const alertMsg = `${userName} isimli uyenin cihazindan 15 dakikadir konum alinamiyor! Baglanti kesilmis olabilir.`;
+
+        const alerts = await this.notificationsService.raiseUserAlertForFamilies({
+          familyIds,
+          userId,
+          type: AlertType.connection_lost,
+          title: alertTitle,
+          message: alertMsg,
+          metadata: {
+            lastRecordedAt: lastLocation ? lastLocation.recordedAt : null,
           },
+          notificationData: { type: 'connection_lost', userId },
+          dedupeActiveByUser: true,
         });
 
-        if (!activeAlert) {
-          const alertTitle = 'Bağlantı Kesildi';
-          const alertMsg = `${userName} isimli üyenin cihazından 10 dakikadır konum alınamıyor! Bağlantı kesilmiş olabilir.`;
-
-          for (const familyId of familyIds) {
-            await this.prisma.alert.create({
-              data: {
-                familyId,
-                userId,
-                type: AlertType.connection_lost,
-                title: alertTitle,
-                message: alertMsg,
-                metadata: {
-                  lastRecordedAt: lastLocation ? lastLocation.recordedAt : null,
-                },
-              },
-            });
-
-            await this.notificationsService.sendFamilyNotification(
-              familyId,
-              userId,
-              alertTitle,
-              alertMsg,
-              { type: 'connection_lost', userId },
-            );
-          }
+        if (alerts.length > 0) {
           this.logger.warn(
-            `${userName} (${userId}) için bağlantı koptu alarmı oluşturuldu.`,
+            `${userName} (${userId}) icin baglanti koptu alarmi olusturuldu.`,
           );
         }
       }
@@ -145,11 +186,27 @@ export class CronService {
       'Hareketsizlik kontrolü zamanlanmış görevi başlatılıyor...',
     );
 
+    if (this.isInInactivityQuietHours()) {
+      this.logger.log(
+        'Hareketsizlik kontrolu sessiz saatlerde oldugu icin bildirim uretilmedi.',
+      );
+      return;
+    }
+
     const eightHoursAgo = new Date(Date.now() - 8 * 60 * 60 * 1000);
     const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
 
     // Aile grubunda olan tüm benzersiz kullanıcıları bul
     const activeMembers = await this.prisma.familyMember.findMany({
+      where: {
+        OR: [
+          { memberType: { in: [MemberType.child, MemberType.elder] } },
+          {
+            memberType: MemberType.guardian,
+            guardianTrackingEnabled: true,
+          },
+        ],
+      },
       select: { userId: true, familyId: true },
     });
 
@@ -202,41 +259,41 @@ export class CronService {
           });
           const userName = user ? user.name : 'Bilinmeyen Üye';
 
-          // Zaten aktif hareketsizlik alarmı var mı?
-          const activeAlert = await this.prisma.alert.findFirst({
-            where: {
+          const alertTitle = 'Hareketsizlik Uyarisi';
+          const alertMsg = `${userName} son 8 saattir ayni bolgede hareketsiz kalmistir. Bir durum degisikligi olabilir.`;
+
+          const alertFamilyIds = await this.getInactivityAlertFamilyIds(
+            familyIds,
+            latestLoc.latitude,
+            latestLoc.longitude,
+          );
+
+          if (alertFamilyIds.length === 0) {
+            this.logger.log(
+              `${userName} (${userId}) guvenli bolgede oldugu icin hareketsizlik bildirimi uretilmedi.`,
+            );
+            continue;
+          }
+
+          const alerts =
+            await this.notificationsService.raiseUserAlertForFamilies({
+              familyIds: alertFamilyIds,
               userId,
               type: AlertType.inactivity,
-              status: AlertStatus.active,
-            },
-          });
+              title: alertTitle,
+              message: alertMsg,
+              metadata: {
+                radius: 20,
+                hours: 8,
+                skippedSafeZones: familyIds.length - alertFamilyIds.length,
+              },
+              notificationData: { type: 'inactivity', userId },
+              dedupeActiveByUser: true,
+            });
 
-          if (!activeAlert) {
-            const alertTitle = 'Hareketsizlik Uyarısı';
-            const alertMsg = `${userName} son 8 saattir aynı bölgede hareketsiz kalmıştır. Bir durum değişikliği olabilir.`;
-
-            for (const familyId of familyIds) {
-              await this.prisma.alert.create({
-                data: {
-                  familyId,
-                  userId,
-                  type: AlertType.inactivity,
-                  title: alertTitle,
-                  message: alertMsg,
-                  metadata: { radius: 20, hours: 8 },
-                },
-              });
-
-              await this.notificationsService.sendFamilyNotification(
-                familyId,
-                userId,
-                alertTitle,
-                alertMsg,
-                { type: 'inactivity', userId },
-              );
-            }
+          if (alerts.length > 0) {
             this.logger.warn(
-              `${userName} (${userId}) için hareketsizlik alarmı oluşturuldu.`,
+              `${userName} (${userId}) icin hareketsizlik alarmi olusturuldu.`,
             );
           }
         }
@@ -365,16 +422,24 @@ export class CronService {
     }
   }
 
-  // 4. Periyodik Konum Pingi (Her 5 dakikada bir çalışır)
-  @Cron('0 */5 * * * *')
+  // 4. Periyodik Konum Pingi (7, 10 ve 13. dakika civarinda denenir)
+  @Cron('0 * * * * *')
   async handleSilentPingCheck() {
     this.logger.log('Sessiz konum pingi zamanlanmış görevi başlatılıyor...');
 
-    const sevenMinutesAgo = new Date(Date.now() - 7 * 60 * 1000);
-    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+    const silentPingMinutes = new Set([7, 10, 13]);
 
-    // Aktif tüm üyeleri bul
+    // Aktif tÃ¼m Ã¼yeleri bul
     const activeMembers = await this.prisma.familyMember.findMany({
+      where: {
+        OR: [
+          { memberType: { in: [MemberType.child, MemberType.elder] } },
+          {
+            memberType: MemberType.guardian,
+            guardianTrackingEnabled: true,
+          },
+        ],
+      },
       select: { userId: true },
     });
 
@@ -383,28 +448,33 @@ export class CronService {
     );
 
     for (const userId of uniqueUserIds) {
-      // Eğer kullanıcı şu an WebSocket ile bağlıysa ping göndermeye gerek yok
+      // EÄŸer kullanÄ±cÄ± ÅŸu an WebSocket ile baÄŸlÄ±ysa ping gÃ¶ndermeye gerek yok
       if (this.locationsGateway.isUserConnected(userId)) {
         continue;
       }
 
-      // Kullanıcının en son konum kaydını al
+      // KullanÄ±cÄ±nÄ±n en son konum kaydÄ±nÄ± al
       const lastLocation = await this.prisma.location.findFirst({
         where: { userId },
         orderBy: { recordedAt: 'desc' },
       });
 
-      // Eğer son konum 7 ila 15 dakika arasındaysa, hala açık ama hareketsiz olabilir. Ping gönder.
-      if (
-        lastLocation &&
-        lastLocation.recordedAt < sevenMinutesAgo &&
-        lastLocation.recordedAt > fifteenMinutesAgo
-      ) {
+      if (!lastLocation) {
+        continue;
+      }
+
+      const ageMinutes = Math.floor(
+        (Date.now() - lastLocation.recordedAt.getTime()) / (60 * 1000),
+      );
+
+      // 15. dakikadaki gorunur uyaridan once cihaz uyandirilmaya calisilir.
+      if (silentPingMinutes.has(ageMinutes)) {
         this.logger.log(
-          `Kullanıcı (${userId}) için sessiz ping bildirimi gönderiliyor...`,
+          `Kullanici (${userId}) icin ${ageMinutes}. dakikada sessiz ping bildirimi gonderiliyor...`,
         );
         await this.locationsGateway.sendSilentPushNotification([userId], {
           action: 'ping',
+          ageMinutes,
         });
       }
     }

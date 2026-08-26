@@ -419,7 +419,7 @@ export class LocationsGateway
     const room = `family_${data.familyId}`;
     void client.join(room);
     this.logger.log(`İstemci (${client.id}), odaya katıldı: ${room}`);
-    return { status: 'success', room };
+    return { status: 'success' };
   }
 
   @SubscribeMessage('joinAdminControlRoom')
@@ -462,7 +462,7 @@ export class LocationsGateway
     this.logger.log(
       `İstemci (${client.id} - ${userId}), odadan ayrıldı: ${room}`,
     );
-    return { status: 'success', room };
+    return { status: 'success' };
   }
 
   @SubscribeMessage('sendDeviceLock')

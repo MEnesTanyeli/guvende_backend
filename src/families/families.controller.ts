@@ -13,6 +13,7 @@ import { CreateFamilyDto } from './dto/create-family.dto';
 import { JoinFamilyDto } from './dto/join-family.dto';
 import { MuteNotificationsDto } from './dto/mute-notifications.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
+import { UpdateOwnTrackingDto } from './dto/update-own-tracking.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 
@@ -86,5 +87,18 @@ export class FamiliesController {
     @Body() dto: MuteNotificationsDto,
   ) {
     return this.familiesService.muteNotifications(userId, familyId, dto.mute);
+  }
+
+  @Patch(':id/tracking')
+  async updateOwnTracking(
+    @GetUser('id') userId: string,
+    @Param('id') familyId: string,
+    @Body() dto: UpdateOwnTrackingDto,
+  ) {
+    return this.familiesService.updateOwnTracking(
+      userId,
+      familyId,
+      dto.enabled,
+    );
   }
 }

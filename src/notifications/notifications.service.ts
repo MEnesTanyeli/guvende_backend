@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as https from 'https';
 import { PrismaService } from '../prisma/prisma.service';
 import { LocationsGateway } from '../locations/locations.gateway';
+import { AlertStatus, AlertType, Prisma } from '@prisma/client';
 
 interface OneSignalPayload {
   app_id: string;
@@ -13,6 +14,26 @@ interface OneSignalPayload {
   android_ongoing?: boolean;
 }
 
+type AlertDelivery = 'family' | 'socket' | 'none';
+
+interface RaiseFamilyAlertInput {
+  familyId: string;
+  userId: string;
+  type: AlertType;
+  title: string;
+  message: string;
+  metadata?: Prisma.InputJsonValue;
+  notificationData?: Record<string, unknown>;
+  delivery?: AlertDelivery;
+  dedupeActive?: boolean;
+}
+
+interface RaiseUserAlertForFamiliesInput
+  extends Omit<RaiseFamilyAlertInput, 'familyId'> {
+  familyIds: string[];
+  dedupeActiveByUser?: boolean;
+}
+
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger('NotificationsService');
@@ -21,6 +42,113 @@ export class NotificationsService {
     private prisma: PrismaService,
     private locationsGateway: LocationsGateway,
   ) {}
+
+  async raiseFamilyAlert(input: RaiseFamilyAlertInput) {
+    if (input.dedupeActive) {
+      const activeAlert = await this.prisma.alert.findFirst({
+        where: {
+          familyId: input.familyId,
+          userId: input.userId,
+          type: input.type,
+          status: AlertStatus.active,
+        },
+      });
+
+      if (activeAlert) {
+        return activeAlert;
+      }
+    }
+
+    const alert = await this.prisma.alert.create({
+      data: {
+        familyId: input.familyId,
+        userId: input.userId,
+        type: input.type,
+        title: input.title,
+        message: input.message,
+        status: AlertStatus.active,
+        metadata: input.metadata,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    const delivery = input.delivery ?? 'family';
+    const notificationData = input.notificationData ?? {
+      type: input.type,
+      userId: input.userId,
+    };
+
+    if (delivery === 'family') {
+      await this.sendFamilyNotification(
+        input.familyId,
+        input.userId,
+        input.title,
+        input.message,
+        notificationData,
+      );
+    } else if (delivery === 'socket') {
+      await this.locationsGateway.sendAlertNotification(input.familyId, alert);
+    }
+
+    return alert;
+  }
+
+  async raiseUserAlertForFamilies(input: RaiseUserAlertForFamiliesInput) {
+    if (input.dedupeActiveByUser) {
+      const activeAlert = await this.prisma.alert.findFirst({
+        where: {
+          userId: input.userId,
+          type: input.type,
+          status: AlertStatus.active,
+        },
+      });
+
+      if (activeAlert) {
+        return [];
+      }
+    }
+
+    const alerts: Array<{ id: string }> = [];
+    for (const familyId of input.familyIds) {
+      const alert = await this.raiseFamilyAlert({
+        familyId,
+        userId: input.userId,
+        type: input.type,
+        title: input.title,
+        message: input.message,
+        metadata: input.metadata,
+        notificationData: input.notificationData,
+        delivery: input.delivery,
+      });
+      alerts.push(alert);
+    }
+
+    return alerts;
+  }
+
+  async resolveActiveAlerts(userId: string, types: AlertType | AlertType[]) {
+    const alertTypes = Array.isArray(types) ? types : [types];
+
+    return this.prisma.alert.updateMany({
+      where: {
+        userId,
+        type: { in: alertTypes },
+        status: AlertStatus.active,
+      },
+      data: {
+        status: AlertStatus.resolved,
+        resolvedAt: new Date(),
+      },
+    });
+  }
 
   async sendOneSignalNotification(
     userIds: string[],

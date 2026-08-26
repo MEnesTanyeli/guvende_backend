@@ -7,15 +7,15 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateMedicationDto } from './dto/create-medication.dto';
 import { UpdateMedicationDto } from './dto/update-medication.dto';
 import { UsersService } from '../users/users.service';
-import { AlertStatus, AlertType, MemberType } from '@prisma/client';
-import { LocationsGateway } from '../locations/locations.gateway';
+import { AlertType, MemberType } from '@prisma/client';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class MedicationsService {
   constructor(
     private prisma: PrismaService,
     private usersService: UsersService,
-    private locationsGateway: LocationsGateway,
+    private notificationsService: NotificationsService,
   ) {}
 
   async createReminder(creatorId: string, dto: CreateMedicationDto) {
@@ -163,37 +163,21 @@ export class MedicationsService {
     }
 
     for (const membership of memberships) {
-      const alert = await this.prisma.alert.create({
-        data: {
-          familyId: membership.familyId,
-          userId: userId,
-          type: AlertType.medication_taken,
-          title,
-          message,
-          status: AlertStatus.active,
-          metadata: {
-            reminderId,
-            medicationName: reminder.medicationName,
-            dosage: reminder.dosage,
-            time: reminder.time,
-            reminderType: rType,
-          },
+      await this.notificationsService.raiseFamilyAlert({
+        familyId: membership.familyId,
+        userId,
+        type: AlertType.medication_taken,
+        title,
+        message,
+        metadata: {
+          reminderId,
+          medicationName: reminder.medicationName,
+          dosage: reminder.dosage,
+          time: reminder.time,
+          reminderType: rType,
         },
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-            },
-          },
-        },
+        delivery: 'socket',
       });
-
-      await this.locationsGateway.sendAlertNotification(
-        membership.familyId,
-        alert,
-      );
     }
 
     return updated;
