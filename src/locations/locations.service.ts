@@ -21,6 +21,31 @@ export class LocationsService {
     private notificationsService: NotificationsService,
   ) {}
 
+  private formatGeofenceEventMessage(
+    userName: string,
+    zoneName: string,
+    action: 'giriş yaptı' | 'çıkış yaptı',
+    recordedAt: Date,
+    delayed: boolean,
+  ): string {
+    const locationText = action === 'giriş yaptı' ? 'güvenli bölgesine' : 'güvenli bölgesinden';
+
+    if (!delayed) {
+      return `${userName}, "${zoneName}" ${locationText} ${action}.`;
+    }
+
+    const eventTime = new Intl.DateTimeFormat('tr-TR', {
+      timeZone: 'Europe/Istanbul',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(recordedAt);
+
+    return `${userName}, saat ${eventTime}'de "${zoneName}" ${locationText} ${action}. Bildirim internet bağlantısı geldikten sonra iletildi.`;
+  }
+
   private getIstanbulDateKey(date = new Date()): string {
     const parts = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Europe/Istanbul',
@@ -310,7 +335,13 @@ export class LocationsService {
         const zone = safeZones.find((z) => z.id === insideZoneId);
         if (zone) {
           const alertTitle = 'Güvenli Bölgeye Giriş';
-          const alertMsg = `${user.name}, "${zone.name}" güvenli bölgesine giriş yaptı.`;
+          const alertMsg = this.formatGeofenceEventMessage(
+            user.name,
+            zone.name,
+            'giriş yaptı',
+            recordedAt,
+            isStale,
+          );
 
           await this.notificationsService.raiseFamilyAlert({
             familyId,
@@ -318,13 +349,18 @@ export class LocationsService {
             type: AlertType.safe_zone_enter,
             title: alertTitle,
             message: alertMsg,
-            metadata: { safeZoneId: zone.id, safeZoneName: zone.name },
+            metadata: {
+              safeZoneId: zone.id,
+              safeZoneName: zone.name,
+              occurredAt: recordedAt.toISOString(),
+              delayedDelivery: isStale,
+            },
             notificationData: {
               type: 'safe_zone_enter',
               userId,
               zoneId: zone.id,
             },
-            delivery: isStale ? 'none' : 'family',
+            delivery: 'family',
           });
 
           alertTriggered = true;
@@ -365,7 +401,13 @@ export class LocationsService {
 
           if (confirmExit) {
             const alertTitle = 'Güvenli Bölgeden Çıkış';
-            const alertMsg = `${user.name}, "${zone.name}" güvenli bölgesinden çıkış yaptı!`;
+            const alertMsg = this.formatGeofenceEventMessage(
+              user.name,
+              zone.name,
+              'çıkış yaptı',
+              recordedAt,
+              isStale,
+            );
 
             await this.notificationsService.raiseFamilyAlert({
               familyId,
@@ -373,13 +415,18 @@ export class LocationsService {
               type: AlertType.safe_zone_exit,
               title: alertTitle,
               message: alertMsg,
-              metadata: { safeZoneId: zone.id, safeZoneName: zone.name },
+              metadata: {
+                safeZoneId: zone.id,
+                safeZoneName: zone.name,
+                occurredAt: recordedAt.toISOString(),
+                delayedDelivery: isStale,
+              },
               notificationData: {
                 type: 'safe_zone_exit',
                 userId,
                 zoneId: zone.id,
               },
-              delivery: isStale ? 'none' : 'family',
+              delivery: 'family',
             });
 
             alertTriggered = true;
