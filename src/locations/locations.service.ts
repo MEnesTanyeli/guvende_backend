@@ -85,6 +85,106 @@ export class LocationsService {
     );
   }
 
+  private async calculateMovementStatus(
+    userId: string,
+    dto: RecordLocationDto,
+    prevLocation: {
+      latitude: number;
+      longitude: number;
+      speed: number | null;
+      accuracy: number | null;
+      recordedAt: Date;
+      movementStatus: string;
+    } | null,
+  ): Promise<'unknown' | 'moving' | 'stationary' | 'invalid'> {
+    if (!prevLocation) return 'unknown';
+
+    const accuracy = dto.accuracy ?? 20;
+    if (!Number.isFinite(accuracy) || accuracy > 120) return 'invalid';
+
+    const recordedAt = dto.recordedAt ? new Date(dto.recordedAt) : new Date();
+    const distanceFromPrevious = this.getDistanceInMeters(
+      prevLocation.latitude,
+      prevLocation.longitude,
+      dto.latitude,
+      dto.longitude,
+    );
+    const elapsedSeconds = Math.max(
+      0.5,
+      (recordedAt.getTime() - prevLocation.recordedAt.getTime()) / 1000,
+    );
+    const calculatedSpeedKmh = (distanceFromPrevious / elapsedSeconds) * 3.6;
+
+    // Match the client-side stable-position rules: reject noisy fixes and
+    // require multiple consistent points before declaring movement.
+    const snapThreshold = 55;
+    if (accuracy > 18 || distanceFromPrevious < snapThreshold) {
+      return 'stationary';
+    }
+    if (calculatedSpeedKmh > 180) return 'invalid';
+
+    const recent = await this.prisma.location.findMany({
+      where: { userId },
+      orderBy: { recordedAt: 'desc' },
+      take: 3,
+      select: {
+        latitude: true,
+        longitude: true,
+        speed: true,
+        accuracy: true,
+        recordedAt: true,
+      },
+    });
+    const candidates = [
+      ...recent.reverse(),
+      {
+        latitude: dto.latitude,
+        longitude: dto.longitude,
+        speed: dto.speed ?? 0,
+        accuracy,
+        recordedAt,
+      },
+    ];
+    let consistentCandidates = 0;
+    for (let i = 0; i < candidates.length; i++) {
+      const candidate = candidates[i];
+      const anchorDistance = this.getDistanceInMeters(
+        prevLocation.latitude,
+        prevLocation.longitude,
+        candidate.latitude,
+        candidate.longitude,
+      );
+      if ((candidate.accuracy ?? 20) > 18 || anchorDistance < snapThreshold) {
+        consistentCandidates = 0;
+        continue;
+      }
+
+      const previous = i > 0 ? candidates[i - 1] : prevLocation;
+      const stepDistance = this.getDistanceInMeters(
+        previous.latitude,
+        previous.longitude,
+        candidate.latitude,
+        candidate.longitude,
+      );
+      const stepSeconds = Math.max(
+        1,
+        (candidate.recordedAt.getTime() - previous.recordedAt.getTime()) / 1000,
+      );
+      const stepSpeedKmh = (stepDistance / stepSeconds) * 3.6;
+      const gpsSpeed = candidate.speed ?? 0;
+      const maxStepDistance = Math.max(100, (180 / 3.6) * stepSeconds + 25);
+      const usefulStep = stepDistance >= 5 || gpsSpeed >= 3 || calculatedSpeedKmh >= 3;
+
+      if (stepDistance <= maxStepDistance && stepSpeedKmh <= 180 && usefulStep) {
+        consistentCandidates++;
+      } else {
+        consistentCandidates = 0;
+      }
+    }
+
+    return consistentCandidates >= 3 ? 'moving' : 'stationary';
+  }
+
   async recordLocation(userId: string, dto: RecordLocationDto) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -106,6 +206,13 @@ export class LocationsService {
       orderBy: { recordedAt: 'desc' },
     });
 
+    const recordedAt = dto.recordedAt ? new Date(dto.recordedAt) : new Date();
+    const movementStatus = await this.calculateMovementStatus(
+      userId,
+      dto,
+      prevLocation,
+    );
+
     // Yeni konum kaydını veritabanına ekle
     const newLocation = await this.prisma.location.create({
       data: {
@@ -117,7 +224,8 @@ export class LocationsService {
         batteryLevel: dto.batteryLevel,
         isCharging: dto.isCharging ?? false,
         connectionStatus: dto.connectionStatus || 'online',
-        recordedAt: dto.recordedAt ? new Date(dto.recordedAt) : new Date(),
+        movementStatus,
+        recordedAt,
       },
       include: {
         user: {

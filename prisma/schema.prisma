@@ -138,6 +138,7 @@ model Location {
   batteryLevel     Int?
   isCharging       Boolean? @default(false)
   connectionStatus String   @default("online")
+  movementStatus   String   @default("unknown")
   recordedAt       DateTime @default(now())
 
   @@index([userId, recordedAt(sort: Desc)])

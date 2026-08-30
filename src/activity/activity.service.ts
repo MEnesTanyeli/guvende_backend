@@ -82,7 +82,11 @@ export class ActivityService {
         locations[i + 1].longitude,
       );
       // Gürültüyü engellemek için 5 metreden küçük sapmaları yok sayalım
-      if (dist > 5) {
+      // Prefer the backend movement decision; keep a distance fallback for old rows.
+      if (
+        locations[i + 1].movementStatus === 'moving' ||
+        (locations[i + 1].movementStatus === 'unknown' && dist >= 15)
+      ) {
         totalDistance += dist;
       }
     }
