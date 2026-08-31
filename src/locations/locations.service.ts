@@ -108,6 +108,86 @@ export class LocationsService {
     return radius * 1.2;
   }
 
+  private getBearingFromZoneCenter(
+    zoneLatitude: number,
+    zoneLongitude: number,
+    pointLatitude: number,
+    pointLongitude: number,
+  ): number {
+    const y = Math.sin((pointLongitude - zoneLongitude) * (Math.PI / 180));
+    const x =
+      Math.cos(zoneLatitude * (Math.PI / 180)) *
+      Math.tan(pointLatitude * (Math.PI / 180)) -
+      Math.sin(zoneLatitude * (Math.PI / 180)) *
+      Math.cos((pointLongitude - zoneLongitude) * (Math.PI / 180));
+
+    return (Math.atan2(y, x) * 180) / Math.PI;
+  }
+
+  private getAngleDifference(angleA: number, angleB: number): number {
+    return Math.abs((((angleA - angleB + 540) % 360) - 180));
+  }
+
+  private isConsistentExitPath(
+    points: MovementLocation[],
+    zone: { latitude: number; longitude: number; radius: number },
+  ): boolean {
+    const chronologicalPoints = [...points].sort(
+      (a, b) => a.recordedAt.getTime() - b.recordedAt.getTime(),
+    );
+    const bearings = chronologicalPoints.map((point) =>
+      this.getBearingFromZoneCenter(
+        zone.latitude,
+        zone.longitude,
+        point.latitude,
+        point.longitude,
+      ),
+    );
+    const distances = chronologicalPoints.map((point) =>
+      this.getDistanceInMeters(
+        point.latitude,
+        point.longitude,
+        zone.latitude,
+        zone.longitude,
+      ),
+    );
+    const maxBearingDiff = Math.max(
+      this.getAngleDifference(bearings[0], bearings[1]),
+      this.getAngleDifference(bearings[1], bearings[2]),
+      this.getAngleDifference(bearings[0], bearings[2]),
+    );
+    const lastDistance = distances[distances.length - 1];
+    const firstDistance = distances[0];
+    const distanceProgress = lastDistance - firstDistance;
+    const staysAwayFromCenter =
+      distances[1] >= firstDistance - zone.radius * 0.15 &&
+      distances[2] >= distances[1] - zone.radius * 0.15;
+    const movesAwayFromCenter = distanceProgress >= zone.radius * 0.2;
+    const hasPlausibleSpeed = chronologicalPoints.every((point, index) => {
+      if (index === 0) return true;
+
+      const previous = chronologicalPoints[index - 1];
+      const timeDiffSeconds =
+        (point.recordedAt.getTime() - previous.recordedAt.getTime()) / 1000;
+      if (timeDiffSeconds <= 0) return false;
+
+      const distance = this.getDistanceInMeters(
+        previous.latitude,
+        previous.longitude,
+        point.latitude,
+        point.longitude,
+      );
+      const speedKmh = (distance / timeDiffSeconds) * 3.6;
+      return speedKmh <= 180;
+    });
+
+    return (
+      maxBearingDiff <= 70 &&
+      hasPlausibleSpeed &&
+      (movesAwayFromCenter || staysAwayFromCenter)
+    );
+  }
+
   private isTrackableMember(member: {
     memberType: MemberType;
     guardianTrackingEnabled: boolean;
@@ -375,82 +455,86 @@ export class LocationsService {
       for (const zone of exitCandidateZones) {
         // Drift Guard: Çıkışı, güvenli alan yarıçapının %20 tolerans dışındaki
         // art arda gelen konumlarla doğrula. Tek noktalık sağ/sol sapmaları çıkış sayma.
-          let confirmExit = true;
-          if (!isStale) {
-            const recentLocations = await this.prisma.location.findMany({
-              where: {
-                userId,
-                recordedAt: { lte: recordedAt },
-              },
-              orderBy: { recordedAt: 'desc' },
-              take: 4,
-            });
-
-            if (recentLocations.length >= 3) {
-              const toleratedRadius = this.getGeofenceToleranceRadius(zone.radius);
-              const latestThree = recentLocations.slice(0, 3);
-              const outsidePoints = latestThree.filter((loc) => {
-                const dist = this.getDistanceInMeters(
-                  loc.latitude,
-                  loc.longitude,
-                  zone.latitude,
-                  zone.longitude,
-                );
-                return dist > toleratedRadius;
-              });
-              const previousInsidePoint = recentLocations.slice(3).find((loc) => {
-                const dist = this.getDistanceInMeters(
-                  loc.latitude,
-                  loc.longitude,
-                  zone.latitude,
-                  zone.longitude,
-                );
-                return dist <= zone.radius;
-              });
-
-              if (outsidePoints.length < 3 || !previousInsidePoint) {
-                confirmExit = false;
-                this.logger.log(
-                  `Geofence çıkışı doğrulanmadı (Drift Guard). Son 3 konumdan ${outsidePoints.length} tanesi ${Math.round(toleratedRadius)}m toleransın dışındaydı.`,
-                );
-              }
-            } else {
-              confirmExit = false;
-            }
-          }
-
-          if (confirmExit) {
-            const alertTitle = 'Güvenli Bölgeden Çıkış';
-            const alertMsg = this.formatGeofenceEventMessage(
-              user.name,
-              zone.name,
-              'çıkış yaptı',
-              recordedAt,
-              isStale,
-            );
-
-            await this.notificationsService.raiseFamilyAlert({
-              familyId,
+        let confirmExit = true;
+        if (!isStale) {
+          const recentLocations = await this.prisma.location.findMany({
+            where: {
               userId,
-              type: AlertType.safe_zone_exit,
-              title: alertTitle,
-              message: alertMsg,
-              metadata: {
-                safeZoneId: zone.id,
-                safeZoneName: zone.name,
-                occurredAt: recordedAt.toISOString(),
-                delayedDelivery: isStale,
-              },
-              notificationData: {
-                type: 'safe_zone_exit',
-                userId,
-                zoneId: zone.id,
-              },
-              delivery: 'family',
-              dedupeActive: true,
-              dedupeWindowMs: 2 * 60 * 1000,
+              recordedAt: { lte: recordedAt },
+            },
+            orderBy: { recordedAt: 'desc' },
+            take: 4,
+          });
+
+          if (recentLocations.length >= 3) {
+            const toleratedRadius = this.getGeofenceToleranceRadius(zone.radius);
+            const latestThree = recentLocations.slice(0, 3);
+            const outsidePoints = latestThree.filter((loc) => {
+              const dist = this.getDistanceInMeters(
+                loc.latitude,
+                loc.longitude,
+                zone.latitude,
+                zone.longitude,
+              );
+              return dist > toleratedRadius;
             });
+            const previousInsidePoint = recentLocations.slice(3).find((loc) => {
+              const dist = this.getDistanceInMeters(
+                loc.latitude,
+                loc.longitude,
+                zone.latitude,
+                zone.longitude,
+              );
+              return dist <= zone.radius;
+            });
+
+            if (
+              outsidePoints.length < 3 ||
+              !previousInsidePoint ||
+              !this.isConsistentExitPath(latestThree, zone)
+            ) {
+              confirmExit = false;
+              this.logger.log(
+                `Geofence çıkışı doğrulanmadı (Drift Guard). Son 3 konumdan ${outsidePoints.length} tanesi ${Math.round(toleratedRadius)}m toleransın dışındaydı veya hareket yönü tutarlı değildi.`,
+              );
+            }
+          } else {
+            confirmExit = false;
           }
+        }
+
+        if (confirmExit) {
+          const alertTitle = 'Güvenli Bölgeden Çıkış';
+          const alertMsg = this.formatGeofenceEventMessage(
+            user.name,
+            zone.name,
+            'çıkış yaptı',
+            recordedAt,
+            isStale,
+          );
+
+          await this.notificationsService.raiseFamilyAlert({
+            familyId,
+            userId,
+            type: AlertType.safe_zone_exit,
+            title: alertTitle,
+            message: alertMsg,
+            metadata: {
+              safeZoneId: zone.id,
+              safeZoneName: zone.name,
+              occurredAt: recordedAt.toISOString(),
+              delayedDelivery: isStale,
+            },
+            notificationData: {
+              type: 'safe_zone_exit',
+              userId,
+              zoneId: zone.id,
+            },
+            delivery: 'family',
+            dedupeActive: true,
+            dedupeWindowMs: 2 * 60 * 1000,
+          });
+        }
       }
 
       // 2. Canlı WebSocket Yayını (Bölge adıyla birlikte)
