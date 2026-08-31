@@ -8,8 +8,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RecordLocationDto } from './dto/record-location.dto';
 import { RecordBulkLocationsDto } from './dto/record-bulk-locations.dto';
 import { LocationsGateway } from './locations.gateway';
-import { AlertType, MemberType } from '@prisma/client';
+import { AlertType, Location, MemberType, Prisma } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
+
+type MovementLocation = Pick<
+  Location,
+  'latitude' | 'longitude' | 'speed' | 'accuracy' | 'recordedAt' | 'movementStatus'
+>;
 
 @Injectable()
 export class LocationsService {
@@ -111,16 +116,8 @@ export class LocationsService {
   }
 
   private async calculateMovementStatus(
-    userId: string,
     dto: RecordLocationDto,
-    prevLocation: {
-      latitude: number;
-      longitude: number;
-      speed: number | null;
-      accuracy: number | null;
-      recordedAt: Date;
-      movementStatus: string;
-    } | null,
+    prevLocation: MovementLocation | null,
   ): Promise<'unknown' | 'moving' | 'stationary' | 'invalid'> {
     if (!prevLocation) return 'unknown';
 
@@ -140,74 +137,26 @@ export class LocationsService {
     );
     const calculatedSpeedKmh = (distanceFromPrevious / elapsedSeconds) * 3.6;
 
-    // Match the client-side stable-position rules: reject noisy fixes and
-    // require multiple consistent points before declaring movement.
-    const snapThreshold = 55;
-    if (accuracy > 18 || distanceFromPrevious < snapThreshold) {
-      return 'stationary';
-    }
     if (calculatedSpeedKmh > 180) return 'invalid';
 
-    const recent = await this.prisma.location.findMany({
-      where: { userId },
-      orderBy: { recordedAt: 'desc' },
-      take: 3,
-      select: {
-        latitude: true,
-        longitude: true,
-        speed: true,
-        accuracy: true,
-        recordedAt: true,
-      },
-    });
-    const candidates = [
-      ...recent.reverse(),
-      {
-        latitude: dto.latitude,
-        longitude: dto.longitude,
-        speed: dto.speed ?? 0,
-        accuracy,
-        recordedAt,
-      },
-    ];
-    let consistentCandidates = 0;
-    for (let i = 0; i < candidates.length; i++) {
-      const candidate = candidates[i];
-      const anchorDistance = this.getDistanceInMeters(
-        prevLocation.latitude,
-        prevLocation.longitude,
-        candidate.latitude,
-        candidate.longitude,
-      );
-      if ((candidate.accuracy ?? 20) > 18 || anchorDistance < snapThreshold) {
-        consistentCandidates = 0;
-        continue;
-      }
-
-      const previous = i > 0 ? candidates[i - 1] : prevLocation;
-      const stepDistance = this.getDistanceInMeters(
-        previous.latitude,
-        previous.longitude,
-        candidate.latitude,
-        candidate.longitude,
-      );
-      const stepSeconds = Math.max(
-        1,
-        (candidate.recordedAt.getTime() - previous.recordedAt.getTime()) / 1000,
-      );
-      const stepSpeedKmh = (stepDistance / stepSeconds) * 3.6;
-      const gpsSpeed = candidate.speed ?? 0;
-      const maxStepDistance = Math.max(100, (180 / 3.6) * stepSeconds + 25);
-      const usefulStep = stepDistance >= 5 || gpsSpeed >= 3 || calculatedSpeedKmh >= 3;
-
-      if (stepDistance <= maxStepDistance && stepSpeedKmh <= 180 && usefulStep) {
-        consistentCandidates++;
-      } else {
-        consistentCandidates = 0;
-      }
+    const gpsSpeedKmh = dto.speed ?? 0;
+    if (gpsSpeedKmh >= 3 && accuracy <= 80) {
+      return 'moving';
     }
 
-    return consistentCandidates >= 3 ? 'moving' : 'stationary';
+    if (distanceFromPrevious < 15) {
+      return 'stationary';
+    }
+
+    if (
+      accuracy <= 18 &&
+      distanceFromPrevious >= 150 &&
+      calculatedSpeedKmh >= 1
+    ) {
+      return 'moving';
+    }
+
+    return calculatedSpeedKmh >= 3 && accuracy <= 50 ? 'moving' : 'stationary';
   }
 
   async recordLocation(userId: string, dto: RecordLocationDto) {
@@ -221,19 +170,22 @@ export class LocationsService {
     }
 
     // Konum verisinin eski (çevrimdışı gecikmeli) olup olmadığını kontrol et
+    const recordedAt = dto.recordedAt ? new Date(dto.recordedAt) : new Date();
     const isStale = dto.recordedAt
-      ? Date.now() - new Date(dto.recordedAt).getTime() > 5 * 60 * 1000
+      ? Date.now() - recordedAt.getTime() > 5 * 60 * 1000
       : false;
 
-    // Önceki en son konumu al
+    // Use the previous point in event time, not the newest row by server arrival.
+    // This keeps delayed/offline locations from looking like impossible jumps.
     const prevLocation = await this.prisma.location.findFirst({
-      where: { userId },
+      where: {
+        userId,
+        recordedAt: { lt: recordedAt },
+      },
       orderBy: { recordedAt: 'desc' },
     });
 
-    const recordedAt = dto.recordedAt ? new Date(dto.recordedAt) : new Date();
     const movementStatus = await this.calculateMovementStatus(
-      userId,
       dto,
       prevLocation,
     );
@@ -584,17 +536,47 @@ export class LocationsService {
 
     // 3. Geçmiş konumları toplu olarak veritabanına ekleyelim (Prisma createMany ile çok hızlı)
     if (historicalLocationDtos.length > 0) {
-      const dataToInsert = historicalLocationDtos.map((loc) => ({
-        userId,
-        latitude: loc.latitude,
-        longitude: loc.longitude,
-        accuracy: loc.accuracy,
-        speed: loc.speed,
-        batteryLevel: loc.batteryLevel,
-        isCharging: loc.isCharging ?? false,
-        connectionStatus: loc.connectionStatus || 'offline',
-        recordedAt: loc.recordedAt ? new Date(loc.recordedAt) : new Date(),
-      }));
+      const firstRecordedAt = historicalLocationDtos[0].recordedAt
+        ? new Date(historicalLocationDtos[0].recordedAt)
+        : new Date();
+      let prevLocation: MovementLocation | null = await this.prisma.location.findFirst({
+        where: {
+          userId,
+          recordedAt: { lt: firstRecordedAt },
+        },
+        orderBy: { recordedAt: 'desc' },
+      });
+
+      const dataToInsert: Prisma.LocationCreateManyInput[] = [];
+      for (const loc of historicalLocationDtos) {
+        const recordedAt = loc.recordedAt ? new Date(loc.recordedAt) : new Date();
+        const movementStatus = await this.calculateMovementStatus(
+          loc,
+          prevLocation,
+        );
+        const data = {
+          userId,
+          latitude: loc.latitude,
+          longitude: loc.longitude,
+          accuracy: loc.accuracy,
+          speed: loc.speed,
+          batteryLevel: loc.batteryLevel,
+          isCharging: loc.isCharging ?? false,
+          connectionStatus: loc.connectionStatus || 'offline',
+          movementStatus,
+          recordedAt,
+        };
+
+        dataToInsert.push(data);
+        prevLocation = {
+          latitude: data.latitude,
+          longitude: data.longitude,
+          speed: data.speed ?? null,
+          accuracy: data.accuracy ?? null,
+          recordedAt: data.recordedAt,
+          movementStatus: data.movementStatus,
+        };
+      }
 
       await this.prisma.location.createMany({
         data: dataToInsert,
