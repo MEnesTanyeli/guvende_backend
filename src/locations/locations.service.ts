@@ -104,6 +104,10 @@ export class LocationsService {
     return R * c;
   }
 
+  private getGeofenceToleranceRadius(radius: number): number {
+    return radius * 1.2;
+  }
+
   private isTrackableMember(member: {
     memberType: MemberType;
     guardianTrackingEnabled: boolean;
@@ -298,6 +302,7 @@ export class LocationsService {
             });
 
             if (recentPreviousLocations.length >= 3) {
+              const toleratedRadius = this.getGeofenceToleranceRadius(zone.radius);
               const outsidePoints = recentPreviousLocations.filter((loc) => {
                 const dist = this.getDistanceInMeters(
                   loc.latitude,
@@ -305,7 +310,7 @@ export class LocationsService {
                   zone.latitude,
                   zone.longitude,
                 );
-                return dist > zone.radius;
+                return dist > toleratedRadius;
               });
 
               if (outsidePoints.length < 2) {
@@ -314,6 +319,8 @@ export class LocationsService {
                   `Geofence girişi doğrulanmadı (Drift Guard). Son 3 önceki konumdan sadece ${outsidePoints.length} tanesi bölge dışındaydı.`,
                 );
               }
+            } else {
+              confirmEnter = false;
             }
           }
 
@@ -325,6 +332,11 @@ export class LocationsService {
               'giriş yaptı',
               recordedAt,
               isStale,
+            );
+
+            await this.notificationsService.resolveActiveAlerts(
+              userId,
+              AlertType.safe_zone_exit,
             );
 
             await this.notificationsService.raiseFamilyAlert({
@@ -351,21 +363,42 @@ export class LocationsService {
         }
       }
 
-      // Çıkış Senaryosu: Önceki konum bölge içinde, yeni konum dışında
-      if (prevZoneId && insideZoneId !== prevZoneId) {
-        const zone = safeZones.find((z) => z.id === prevZoneId);
-        if (zone) {
-          // Drift Guard: Sıçramaları önlemek için çıkışın doğrulanması
+      // Çıkış Senaryosu: Kullanıcı bölge dışına çıkmış görünüyor.
+      const exitCandidateZones = safeZones.filter((zone) => {
+        if (insideZoneId === zone.id) {
+          return false;
+        }
+
+        return prevZoneId === zone.id || !insideZoneId;
+      });
+
+      for (const zone of exitCandidateZones) {
+        // Drift Guard: Çıkışı, güvenli alan yarıçapının %20 tolerans dışındaki
+        // art arda gelen konumlarla doğrula. Tek noktalık sağ/sol sapmaları çıkış sayma.
           let confirmExit = true;
           if (!isStale) {
             const recentLocations = await this.prisma.location.findMany({
-              where: { userId },
+              where: {
+                userId,
+                recordedAt: { lte: recordedAt },
+              },
               orderBy: { recordedAt: 'desc' },
-              take: 3,
+              take: 4,
             });
 
             if (recentLocations.length >= 3) {
-              const insidePoints = recentLocations.filter((loc) => {
+              const toleratedRadius = this.getGeofenceToleranceRadius(zone.radius);
+              const latestThree = recentLocations.slice(0, 3);
+              const outsidePoints = latestThree.filter((loc) => {
+                const dist = this.getDistanceInMeters(
+                  loc.latitude,
+                  loc.longitude,
+                  zone.latitude,
+                  zone.longitude,
+                );
+                return dist > toleratedRadius;
+              });
+              const previousInsidePoint = recentLocations.slice(3).find((loc) => {
                 const dist = this.getDistanceInMeters(
                   loc.latitude,
                   loc.longitude,
@@ -374,12 +407,15 @@ export class LocationsService {
                 );
                 return dist <= zone.radius;
               });
-              if (insidePoints.length > 0) {
+
+              if (outsidePoints.length < 3 || !previousInsidePoint) {
                 confirmExit = false;
                 this.logger.log(
-                  `Geofence çıkışı doğrulanmadı (Drift Guard). Son 3 konumdan ${insidePoints.length} tanesi hala bölge içinde.`,
+                  `Geofence çıkışı doğrulanmadı (Drift Guard). Son 3 konumdan ${outsidePoints.length} tanesi ${Math.round(toleratedRadius)}m toleransın dışındaydı.`,
                 );
               }
+            } else {
+              confirmExit = false;
             }
           }
 
@@ -411,10 +447,10 @@ export class LocationsService {
                 zoneId: zone.id,
               },
               delivery: 'family',
+              dedupeActive: true,
               dedupeWindowMs: 2 * 60 * 1000,
             });
           }
-        }
       }
 
       // 2. Canlı WebSocket Yayını (Bölge adıyla birlikte)
