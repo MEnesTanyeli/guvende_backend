@@ -26,6 +26,7 @@ interface RaiseFamilyAlertInput {
   notificationData?: Record<string, unknown>;
   delivery?: AlertDelivery;
   dedupeActive?: boolean;
+  dedupeWindowMs?: number;
 }
 
 interface RaiseUserAlertForFamiliesInput
@@ -56,6 +57,24 @@ export class NotificationsService {
 
       if (activeAlert) {
         return activeAlert;
+      }
+    }
+
+    if (input.dedupeWindowMs && input.dedupeWindowMs > 0) {
+      const recentAlert = await this.prisma.alert.findFirst({
+        where: {
+          familyId: input.familyId,
+          userId: input.userId,
+          type: input.type,
+          createdAt: {
+            gte: new Date(Date.now() - input.dedupeWindowMs),
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (recentAlert) {
+        return recentAlert;
       }
     }
 

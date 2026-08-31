@@ -281,6 +281,7 @@ export class LocationsService {
       }
 
       let alertTriggered = false;
+      let geofenceTransitionRejected = false;
 
       // Giriş Senaryosu: Önceki konum bölge dışında, yeni konum içinde
       if (insideZoneId && prevZoneId !== insideZoneId) {
@@ -313,6 +314,7 @@ export class LocationsService {
               zoneId: zone.id,
             },
             delivery: 'family',
+            dedupeWindowMs: 2 * 60 * 1000,
           });
 
           alertTriggered = true;
@@ -344,6 +346,7 @@ export class LocationsService {
               });
               if (insidePoints.length > 0) {
                 confirmExit = false;
+                geofenceTransitionRejected = true;
                 this.logger.log(
                   `Geofence çıkışı doğrulanmadı (Drift Guard). Son 3 konumdan ${insidePoints.length} tanesi hala bölge içinde.`,
                 );
@@ -379,6 +382,7 @@ export class LocationsService {
                 zoneId: zone.id,
               },
               delivery: 'family',
+              dedupeWindowMs: 2 * 60 * 1000,
             });
 
             alertTriggered = true;
@@ -388,7 +392,7 @@ export class LocationsService {
 
       // Son Durum Karşılaştırması (Zaman Aşımlı/Gecikmeli Bildirim Tetikleyici)
       // Eğer konum güncelse ve normal akışta yeni bir alarm tetiklenmediyse
-      if (!isStale && !alertTriggered) {
+      if (!isStale && !alertTriggered && !geofenceTransitionRejected) {
         const lastGeofenceAlert = await this.prisma.alert.findFirst({
           where: {
             userId,
@@ -429,6 +433,7 @@ export class LocationsService {
               userId,
               zoneId: lastZoneId,
             },
+            dedupeWindowMs: 2 * 60 * 1000,
           });
         }
         // Velinin bildiği son durum dışarıdaydı (veya yoktu), ama çocuk şu an bir bölgenin içinde
@@ -458,6 +463,7 @@ export class LocationsService {
                 userId,
                 zoneId: zone.id,
               },
+              dedupeWindowMs: 2 * 60 * 1000,
             });
           }
         }
