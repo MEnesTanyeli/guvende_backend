@@ -110,7 +110,18 @@ Yapacağımız iş:
 - Disk doluluk alarmı eklemek.
 - Backup başarısızlık alarmı eklemek.
 
-### 3. - Gerçek ödeme doğrulaması yok
+### 3. - Production logları fazla detaylı
+
+Durum: Dev ortamında WebSocket oda id'leri, socket id'leri, user id'leri ve OneSignal response gövdeleri debug için loglanıyor. Production ortamında bu detay seviyesi gereksiz bilgi açığa çıkarabilir.
+
+Yapacağımız iş:
+
+- Log seviyesini environment'a göre ayırmak.
+- Dev ortamında detaylı logları açık bırakmak.
+- Production ortamında user id, room id, socket id ve provider response gövdelerini maskelemek veya kaldırmak.
+- OneSignal hatalarını production'da kısa, takip edilebilir ve hassas veri içermeyen formatta loglamak.
+
+### 4. - Gerçek ödeme doğrulaması yok
 
 Test amaçlı premium endpoint'i kaldırıldı fakat gerçek ödeme sistemi henüz yok.
 
@@ -121,13 +132,13 @@ Yapacağımız iş:
 - Sunucu tarafında receipt/token kontrolü.
 - İade ve abonelik iptali durumlarının yönetimi.
 
-### 4. - Admin hesapları için MFA eksik
+### 5. - Admin hesapları için MFA eksik
 
 Token/session sistemi migration ile production ortamına alındı. Kalan iş, admin paneli gerçek kullanıma açılmadan önce yönetici hesaplarına MFA eklemek.
 
 Frontend sözleşmesi: [FRONTEND_OTURUM_ENTEGRASYONU.md](./FRONTEND_OTURUM_ENTEGRASYONU.md)
 
-### 5. - Ev sunucusunda tek nokta arızası var
+### 6. - Ev sunucusunda tek nokta arızası var
 
 Elektrik, internet, modem, disk veya bilgisayar arızalanırsa bütün sistem durur.
 
@@ -143,8 +154,9 @@ Elektrik, internet, modem, disk veya bilgisayar arızalanırsa bütün sistem du
 
 1. Gerçek kullanıcı öncesi off-site yedek
 2. Uptime ve hata izleme
-3. Gerçek ödeme doğrulaması
-4. Admin hesapları için MFA
+3. Production loglarını sadeleştirme
+4. Gerçek ödeme doğrulaması
+5. Admin hesapları için MFA
 
 Canlı öncesine ertelenen zorunlu işler:
 
