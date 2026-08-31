@@ -280,44 +280,74 @@ export class LocationsService {
         }
       }
 
-      let alertTriggered = false;
-      let geofenceTransitionRejected = false;
-
       // Giriş Senaryosu: Önceki konum bölge dışında, yeni konum içinde
       if (insideZoneId && prevZoneId !== insideZoneId) {
         const zone = safeZones.find((z) => z.id === insideZoneId);
         if (zone) {
-          const alertTitle = 'Güvenli Bölgeye Giriş';
-          const alertMsg = this.formatGeofenceEventMessage(
-            user.name,
-            zone.name,
-            'giriş yaptı',
-            recordedAt,
-            isStale,
-          );
+          // Drift Guard: Tek noktalık dışarı sapmasından sonra gelen içeri dönüşü
+          // gerçek giriş gibi bildirmemek için önceki konumların da dışarıda olduğunu doğrula.
+          let confirmEnter = true;
+          if (!isStale && prevLocation) {
+            const recentPreviousLocations = await this.prisma.location.findMany({
+              where: {
+                userId,
+                recordedAt: { lt: recordedAt },
+              },
+              orderBy: { recordedAt: 'desc' },
+              take: 3,
+            });
 
-          await this.notificationsService.raiseFamilyAlert({
-            familyId,
-            userId,
-            type: AlertType.safe_zone_enter,
-            title: alertTitle,
-            message: alertMsg,
-            metadata: {
-              safeZoneId: zone.id,
-              safeZoneName: zone.name,
-              occurredAt: recordedAt.toISOString(),
-              delayedDelivery: isStale,
-            },
-            notificationData: {
-              type: 'safe_zone_enter',
+            if (recentPreviousLocations.length >= 3) {
+              const outsidePoints = recentPreviousLocations.filter((loc) => {
+                const dist = this.getDistanceInMeters(
+                  loc.latitude,
+                  loc.longitude,
+                  zone.latitude,
+                  zone.longitude,
+                );
+                return dist > zone.radius;
+              });
+
+              if (outsidePoints.length < 2) {
+                confirmEnter = false;
+                this.logger.log(
+                  `Geofence girişi doğrulanmadı (Drift Guard). Son 3 önceki konumdan sadece ${outsidePoints.length} tanesi bölge dışındaydı.`,
+                );
+              }
+            }
+          }
+
+          if (confirmEnter) {
+            const alertTitle = 'Güvenli Bölgeye Giriş';
+            const alertMsg = this.formatGeofenceEventMessage(
+              user.name,
+              zone.name,
+              'giriş yaptı',
+              recordedAt,
+              isStale,
+            );
+
+            await this.notificationsService.raiseFamilyAlert({
+              familyId,
               userId,
-              zoneId: zone.id,
-            },
-            delivery: 'family',
-            dedupeWindowMs: 2 * 60 * 1000,
-          });
-
-          alertTriggered = true;
+              type: AlertType.safe_zone_enter,
+              title: alertTitle,
+              message: alertMsg,
+              metadata: {
+                safeZoneId: zone.id,
+                safeZoneName: zone.name,
+                occurredAt: recordedAt.toISOString(),
+                delayedDelivery: isStale,
+              },
+              notificationData: {
+                type: 'safe_zone_enter',
+                userId,
+                zoneId: zone.id,
+              },
+              delivery: 'family',
+              dedupeWindowMs: 2 * 60 * 1000,
+            });
+          }
         }
       }
 
@@ -346,7 +376,6 @@ export class LocationsService {
               });
               if (insidePoints.length > 0) {
                 confirmExit = false;
-                geofenceTransitionRejected = true;
                 this.logger.log(
                   `Geofence çıkışı doğrulanmadı (Drift Guard). Son 3 konumdan ${insidePoints.length} tanesi hala bölge içinde.`,
                 );
@@ -384,8 +413,6 @@ export class LocationsService {
               delivery: 'family',
               dedupeWindowMs: 2 * 60 * 1000,
             });
-
-            alertTriggered = true;
           }
         }
       }
