@@ -265,14 +265,21 @@ export class AdminService {
       throw new BadRequestException('Bu panelden yeni yönetici atayamazsınız.');
     }
 
+    const premiumExpiresAt =
+      dto.premiumExpiresAt !== undefined
+        ? new Date(dto.premiumExpiresAt)
+        : dto.isPremium === true
+          ? this.getDefaultPremiumExpiry()
+          : dto.isPremium === false
+            ? null
+            : undefined;
+
     const user = await this.prisma.user.update({
       where: { id: userId },
       data: {
         ...(dto.role !== undefined && { role: dto.role }),
         ...(dto.isPremium !== undefined && { isPremium: dto.isPremium }),
-        ...(dto.premiumExpiresAt !== undefined && {
-          premiumExpiresAt: new Date(dto.premiumExpiresAt),
-        }),
+        ...(premiumExpiresAt !== undefined && { premiumExpiresAt }),
       },
       select: {
         id: true,
@@ -299,6 +306,12 @@ export class AdminService {
     }
 
     return user;
+  }
+
+  private getDefaultPremiumExpiry() {
+    const premiumExpiresAt = new Date();
+    premiumExpiresAt.setFullYear(premiumExpiresAt.getFullYear() + 1);
+    return premiumExpiresAt;
   }
 
   async deleteUser(adminId: string, userId: string) {

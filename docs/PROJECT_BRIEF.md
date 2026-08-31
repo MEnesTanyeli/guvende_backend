@@ -41,7 +41,7 @@ Families need a practical way to understand where members are, whether they are 
 
 - Video calling. The feature is temporarily disabled until the signaling, permission, and product contract are redesigned.
 - Multi-country timezone personalization. Database stays UTC; display/filtering currently targets Turkey local day rules.
-- Payment provider integration. Mock premium endpoint remains a development/product placeholder until a real payment module is selected.
+- Payment provider integration. Premium is currently granted by admins; in-app purchase must stay disabled until provider receipt verification is implemented.
 - Microservice split. The backend remains a modular monolith.
 
 ## Sensitive Data

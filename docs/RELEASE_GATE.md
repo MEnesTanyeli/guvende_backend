@@ -53,4 +53,5 @@ Production deployment still requires explicit release evidence.
 - Production deployment evidence with commit SHA
 - Backup restore test evidence
 - Monitoring/dashboard/alert evidence
-- Real payment replacement or environment gating for `POST /users/purchase-mock`
+- In-app premium purchase stays disabled; premium access is granted only through the admin panel until real payment provider verification is implemented
+- Separate production OneSignal app id, or documented approval to share the current OneSignal app between dev and production

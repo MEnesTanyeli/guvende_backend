@@ -38,8 +38,8 @@ Release blocker bulunmadı. Production source lint now has 0 errors and 0 warnin
 
 | Severity | Finding | Risk | Action |
 |---|---|---|---|
-| MEDIUM | `POST /users/purchase-mock` remains protected but is a production-sensitive mock purchase path. | A normal authenticated user can self-enable premium if this route is reachable in production. | Before production release, replace with real payment/provider flow or environment-gate this endpoint. |
 | MEDIUM | External API HTTP calls use low-level request code without a shared timeout/retry policy everywhere. | Provider stalls may hold resources or produce inconsistent failures. | Introduce a small external HTTP client wrapper with timeout and redacted errors. |
+| MEDIUM | Real payment verification is not implemented yet. | Premium access cannot be sold safely until store/provider receipt validation exists. | Keep in-app purchase disabled and grant premium only through admin flow until Google Play/App Store or provider-side payment verification exists. |
 | LOW | Test/spec files still use broad mocks with `any`. | Test typing is weaker than production source typing. | Keep build/lint gate green; tighten mocks gradually when touching those specs. |
 | LOW | Security review is static/local, not a professional penetration test. | Runtime proxy/firewall/container risks are outside this pass. | Cover in production infrastructure review. |
 

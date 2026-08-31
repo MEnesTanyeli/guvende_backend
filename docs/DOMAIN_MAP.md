@@ -5,7 +5,7 @@
 | Domain | Module Path | Owns | Notes |
 |---|---|---|---|
 | Auth | `src/auth` | Login, register, refresh, logout, password reset, session security. | Public/private boundary starts here. |
-| Users | `src/users` | User profile, premium/mock state, proxy, device permissions. | Must avoid exposing sensitive fields. |
+| Users | `src/users` | User profile, premium state, proxy, device permissions. | Must avoid exposing sensitive fields. |
 | Families | `src/families` | Family records, membership, invite flow, roles. | Core ownership boundary for most data. |
 | Locations | `src/locations` | Location writes, latest/history reads, warning/device signaling. | Uses UTC storage and local-day query policy. |
 | Safe Zones | `src/safe-zones` | Family geofences. | Depends on family ownership and location context. |
