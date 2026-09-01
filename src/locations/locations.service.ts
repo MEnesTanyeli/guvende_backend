@@ -856,6 +856,8 @@ export class LocationsService {
         recordedAt: true,
         batteryLevel: true,
         speed: true,
+        accuracy: true,
+        connectionStatus: true,
       },
     });
   }
