@@ -9,6 +9,7 @@ import { CreateFamilyDto } from './dto/create-family.dto';
 import { JoinFamilyDto } from './dto/join-family.dto';
 import { AlertType, MemberType, Prisma } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
+import { randomBytes } from 'crypto';
 
 @Injectable()
 export class FamiliesService {
@@ -28,6 +29,10 @@ export class FamiliesService {
         ];
     }
     return code;
+  }
+
+  private createSosEncryptionKey(): string {
+    return randomBytes(32).toString('base64url');
   }
 
   private async generateUniqueInviteCode(
@@ -95,6 +100,7 @@ export class FamiliesService {
       const family = await tx.family.create({
         data: {
           inviteCode,
+          sosEncryptionKey: this.createSosEncryptionKey(),
           name: dto.name,
           type: dto.type || 'general',
           ownerId: userId,
@@ -208,6 +214,14 @@ export class FamiliesService {
 
     if (!family) {
       throw new NotFoundException('Aile grubu bulunamadı.');
+    }
+
+    if (!family.sosEncryptionKey) {
+      family.sosEncryptionKey = this.createSosEncryptionKey();
+      await this.prisma.family.update({
+        where: { id: family.id },
+        data: { sosEncryptionKey: family.sosEncryptionKey },
+      });
     }
 
     return family;

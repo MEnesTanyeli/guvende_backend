@@ -54,6 +54,36 @@ describe('Location and WebSocket isolation', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  it('excludes invalid points from location history', async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const prisma: any = {
+      familyMember: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValueOnce({ memberType: MemberType.guardian })
+          .mockResolvedValueOnce({ memberType: MemberType.child }),
+      },
+      location: { findMany },
+    };
+    const service = new LocationsService(prisma, {} as any, {} as any);
+
+    await service.getLocationsHistory(
+      'guardian',
+      'family-1',
+      'child',
+      '2026-09-02',
+    );
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          userId: 'child',
+          movementStatus: { not: 'invalid' },
+        }),
+      }),
+    );
+  });
+
   it('disconnects a WebSocket client with an invalid token', async () => {
     const jwt = {
       verify: jest.fn().mockImplementation(() => {

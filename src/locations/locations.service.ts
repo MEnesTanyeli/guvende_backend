@@ -841,6 +841,9 @@ export class LocationsService {
     return this.prisma.location.findMany({
       where: {
         userId: targetUserId,
+        movementStatus: {
+          not: 'invalid',
+        },
         recordedAt: {
           gte: startOfDay,
           lte: endOfDay,

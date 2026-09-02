@@ -97,6 +97,7 @@ model Session {
 model Family {
   id         String         @id @default(uuid())
   inviteCode String?        @unique
+  sosEncryptionKey String?
   name       String
   type       String         @default("children")
   ownerId    String
