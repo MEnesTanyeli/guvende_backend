@@ -54,7 +54,7 @@ describe('Location and WebSocket isolation', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('excludes invalid points from location history', async () => {
+  it('returns every frontend-accepted point without a backend movement filter', async () => {
     const findMany = jest.fn().mockResolvedValue([]);
     const prisma: any = {
       familyMember: {
@@ -78,10 +78,65 @@ describe('Location and WebSocket isolation', () => {
       expect.objectContaining({
         where: expect.objectContaining({
           userId: 'child',
-          movementStatus: { not: 'invalid' },
         }),
       }),
     );
+    expect(findMany.mock.calls[0][0].where).not.toHaveProperty('movementStatus');
+  });
+
+  it('acknowledges each bulk location by its device point id', async () => {
+    const prisma: any = {
+      user: { findUnique: jest.fn().mockResolvedValue({ id: 'u1' }) },
+      location: {
+        create: jest.fn().mockResolvedValue({ id: 'stored-1' }),
+        findUnique: jest.fn().mockResolvedValue({ id: 'stored-2' }),
+      },
+    };
+    const service = new LocationsService(prisma, {} as any, {} as any);
+    const result = await service.recordBulkLocations('u1', {
+      locations: [
+        {
+          latitude: 41,
+          longitude: 29,
+          measuredAt: '2026-09-09T10:00:00.000Z',
+          devicePointId: 'point-1',
+        },
+        {
+          latitude: 41.1,
+          longitude: 29.1,
+          measuredAt: '2026-09-09T10:01:00.000Z',
+          devicePointId: 'point-2',
+        },
+      ],
+    });
+
+    expect(result.acceptedIds).toEqual(['point-1']);
+    expect(result.duplicateIds).toEqual(['point-2']);
+    expect(result.rejectedItems).toEqual([]);
+    expect(result.count).toBe(2);
+  });
+
+  it('keeps an invalid bulk item out of the acknowledgement lists', async () => {
+    const prisma: any = {
+      user: { findUnique: jest.fn().mockResolvedValue({ id: 'u1' }) },
+      location: { create: jest.fn(), findUnique: jest.fn() },
+    };
+    const service = new LocationsService(prisma, {} as any, {} as any);
+    const result = await service.recordBulkLocations('u1', {
+      locations: [
+        {
+          latitude: 41,
+          longitude: 29,
+          measuredAt: '2026-09-09T10:00:00.000Z',
+        },
+      ],
+    });
+
+    expect(result.acceptedIds).toEqual([]);
+    expect(result.duplicateIds).toEqual([]);
+    expect(result.rejectedItems).toEqual([
+      { devicePointId: '', reason: 'missing_device_point_id' },
+    ]);
   });
 
   it('disconnects a WebSocket client with an invalid token', async () => {

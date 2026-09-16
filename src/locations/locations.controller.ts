@@ -1,5 +1,6 @@
 import {
   Body,
+  BadRequestException,
   Controller,
   Delete,
   Get,
@@ -87,5 +88,18 @@ export class LocationsController {
       familyId,
       targetUserId,
     );
+  }
+
+  @Delete('families/:familyId/locations/history/:targetUserId')
+  async resetLocationHistory(
+    @GetUser('id') userId: string,
+    @Param('familyId') familyId: string,
+    @Param('targetUserId') targetUserId: string,
+    @Query('date') dateStr?: string,
+  ) {
+    if (dateStr === undefined) {
+      throw new BadRequestException('Sıfırlanacak gün belirtilmelidir.');
+    }
+    return this.locationsService.deleteTodayLocations(userId, familyId, targetUserId, dateStr);
   }
 }

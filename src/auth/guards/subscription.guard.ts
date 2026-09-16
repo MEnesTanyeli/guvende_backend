@@ -38,6 +38,12 @@ export class SubscriptionGuard implements CanActivate {
       return false;
     }
 
+    // Ücretsiz erken erişim yalnızca sunucu ortam ayarıyla açılır. Kullanıcının
+    // veritabanında var olma kontrolü yine yapılır; JWT tek başına yeterli değildir.
+    if (process.env.EARLY_ACCESS_ENABLED === 'true') {
+      return true;
+    }
+
     const now = new Date();
 
     // 1. Kullanıcının kendisi premium mu veya deneme süresi aktif mi?

@@ -141,8 +141,14 @@ model Location {
   connectionStatus String   @default("online")
   movementStatus   String   @default("unknown")
   recordedAt       DateTime @default(now())
+  receivedAt       DateTime @default(now())
+  devicePointId    String?
+  filterVersion    String   @default("legacy-client")
+  deliveryMode     String   @default("live")
+  deferredReason   String?
 
   @@index([userId, recordedAt(sort: Desc)])
+  @@unique([userId, devicePointId])
   @@map("locations")
 }
 

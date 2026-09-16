@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   NotFoundException,
   Logger,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RecordLocationDto } from './dto/record-location.dto';
@@ -208,7 +209,14 @@ export class LocationsService {
     const accuracy = dto.accuracy ?? 20;
     if (!Number.isFinite(accuracy) || accuracy > 120) return 'invalid';
 
-    const recordedAt = dto.recordedAt ? new Date(dto.recordedAt) : new Date();
+    const recordedAt = dto.measuredAt
+      ? new Date(dto.measuredAt)
+      : dto.recordedAt
+        ? new Date(dto.recordedAt)
+        : new Date();
+    if (!Number.isFinite(recordedAt.getTime()) || recordedAt.getTime() > Date.now() + 30_000) {
+      throw new BadRequestException('Konum ölçüm zamanı geçersiz.');
+    }
     const distanceFromPrevious = this.getDistanceInMeters(
       prevLocation.latitude,
       prevLocation.longitude,
@@ -254,25 +262,29 @@ export class LocationsService {
     }
 
     // Konum verisinin eski (çevrimdışı gecikmeli) olup olmadığını kontrol et
-    const recordedAt = dto.recordedAt ? new Date(dto.recordedAt) : new Date();
-    const isStale = dto.recordedAt
+    const recordedAt = dto.measuredAt
+      ? new Date(dto.measuredAt)
+      : dto.recordedAt
+        ? new Date(dto.recordedAt)
+        : new Date();
+    const isStale = dto.measuredAt || dto.recordedAt
       ? Date.now() - recordedAt.getTime() > 5 * 60 * 1000
       : false;
 
-    // Use the previous point in event time, not the newest row by server arrival.
-    // This keeps delayed/offline locations from looking like impossible jumps.
+    // Önceki nokta yalnızca güvenli bölge geçişlerinin bağlamı için okunur;
+    // gelen konumu reddetmek veya hareket durumunu yeniden hesaplamak için kullanılmaz.
     const prevLocation = await this.prisma.location.findFirst({
-      where: {
-        userId,
-        recordedAt: { lt: recordedAt },
-      },
+      where: { userId, recordedAt: { lt: recordedAt } },
       orderBy: { recordedAt: 'desc' },
     });
 
-    const movementStatus = await this.calculateMovementStatus(
-      dto,
-      prevLocation,
-    );
+    if (dto.devicePointId) {
+      const existing = await this.prisma.location.findUnique({
+        where: { userId_devicePointId: { userId, devicePointId: dto.devicePointId } },
+        include: { user: { select: { id: true, name: true, email: true } } },
+      });
+      if (existing) return existing;
+    }
 
     // Yeni konum kaydını veritabanına ekle
     const newLocation = await this.prisma.location.create({
@@ -285,8 +297,12 @@ export class LocationsService {
         batteryLevel: dto.batteryLevel,
         isCharging: dto.isCharging ?? false,
         connectionStatus: dto.connectionStatus || 'online',
-        movementStatus,
+        movementStatus: dto.movementStatus || 'unknown',
         recordedAt,
+        devicePointId: dto.devicePointId,
+        filterVersion: dto.filterVersion || 'legacy-client',
+        deliveryMode: dto.deliveryMode || (dto.connectionStatus === 'offline' ? 'deferred' : 'live'),
+        deferredReason: dto.deferredReason,
       },
       include: {
         user: {
@@ -582,22 +598,21 @@ export class LocationsService {
   async recordBulkLocations(userId: string, dto: RecordBulkLocationsDto) {
     const { locations } = dto;
     if (!locations || locations.length === 0) {
-      return { success: true, count: 0 };
+      return {
+        success: true,
+        count: 0,
+        acceptedIds: [],
+        duplicateIds: [],
+        rejectedItems: [],
+      };
     }
 
     // 1. Konumları tarihlerine göre eskiden yeniye doğru sıralayalım
     const sortedLocations = [...locations].sort((a, b) => {
-      const timeA = a.recordedAt ? new Date(a.recordedAt).getTime() : 0;
-      const timeB = b.recordedAt ? new Date(b.recordedAt).getTime() : 0;
+      const timeA = new Date(a.measuredAt || a.recordedAt || 0).getTime();
+      const timeB = new Date(b.measuredAt || b.recordedAt || 0).getTime();
       return timeA - timeB;
     });
-
-    // 2. En son (en güncel) konumu ayıralım, diğerlerini geçmiş veri yapalım
-    const latestLocationDto = sortedLocations[sortedLocations.length - 1];
-    const historicalLocationDtos = sortedLocations.slice(
-      0,
-      sortedLocations.length - 1,
-    );
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -608,27 +623,42 @@ export class LocationsService {
       throw new NotFoundException('Kullanıcı bulunamadı.');
     }
 
-    // 3. Geçmiş konumları toplu olarak veritabanına ekleyelim (Prisma createMany ile çok hızlı)
-    if (historicalLocationDtos.length > 0) {
-      const firstRecordedAt = historicalLocationDtos[0].recordedAt
-        ? new Date(historicalLocationDtos[0].recordedAt)
-        : new Date();
-      let prevLocation: MovementLocation | null = await this.prisma.location.findFirst({
-        where: {
-          userId,
-          recordedAt: { lt: firstRecordedAt },
-        },
-        orderBy: { recordedAt: 'desc' },
-      });
+    const acceptedIds: string[] = [];
+    const duplicateIds: string[] = [];
+    const rejectedItems: Array<{ devicePointId: string; reason: string }> = [];
+    let savedLatestLocation: Location | null = null;
 
-      const dataToInsert: Prisma.LocationCreateManyInput[] = [];
-      for (const loc of historicalLocationDtos) {
-        const recordedAt = loc.recordedAt ? new Date(loc.recordedAt) : new Date();
-        const movementStatus = await this.calculateMovementStatus(
-          loc,
-          prevLocation,
-        );
-        const data = {
+    const validLocations = sortedLocations.filter((loc) => {
+      if (!loc.devicePointId) {
+        rejectedItems.push({
+          devicePointId: '',
+          reason: 'missing_device_point_id',
+        });
+        return false;
+      }
+
+      const recordedAt = new Date(loc.measuredAt || loc.recordedAt || '');
+      if (
+        !Number.isFinite(recordedAt.getTime()) ||
+        recordedAt.getTime() > Date.now() + 30_000
+      ) {
+        rejectedItems.push({
+          devicePointId: loc.devicePointId,
+          reason: 'invalid_measurement_time',
+        });
+        return false;
+      }
+      return true;
+    });
+
+    const latestLocationDto = validLocations[validLocations.length - 1];
+    const historicalLocationDtos = validLocations.slice(0, -1);
+
+    for (const loc of historicalLocationDtos) {
+      try {
+        const recordedAt = new Date(loc.measuredAt || loc.recordedAt!);
+        await this.prisma.location.create({
+          data: {
           userId,
           latitude: loc.latitude,
           longitude: loc.longitude,
@@ -637,36 +667,79 @@ export class LocationsService {
           batteryLevel: loc.batteryLevel,
           isCharging: loc.isCharging ?? false,
           connectionStatus: loc.connectionStatus || 'offline',
-          movementStatus,
+          movementStatus: loc.movementStatus || 'unknown',
           recordedAt,
-        };
-
-        dataToInsert.push(data);
-        prevLocation = {
-          latitude: data.latitude,
-          longitude: data.longitude,
-          speed: data.speed ?? null,
-          accuracy: data.accuracy ?? null,
-          recordedAt: data.recordedAt,
-          movementStatus: data.movementStatus,
-        };
+          devicePointId: loc.devicePointId,
+          filterVersion: loc.filterVersion || 'legacy-client',
+          deliveryMode: loc.deliveryMode || (loc.connectionStatus === 'offline' ? 'deferred' : 'live'),
+          deferredReason: loc.deferredReason,
+          },
+        });
+        acceptedIds.push(loc.devicePointId!);
+      } catch (error) {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2002'
+        ) {
+          duplicateIds.push(loc.devicePointId!);
+        } else {
+          this.logger.error(`Toplu konum kaydı başarısız: ${loc.devicePointId}`, error);
+          rejectedItems.push({
+            devicePointId: loc.devicePointId!,
+            reason: 'storage_error',
+          });
+        }
       }
-
-      await this.prisma.location.createMany({
-        data: dataToInsert,
-      });
     }
 
-    // 4. En güncel konumu mevcut recordLocation metoduyla işleyelim.
-    // Bu sayede en son duruma göre gerekli tüm canlı bildirim ve WebSocket işlemleri tetiklenmiş olur.
-    const savedLatestLocation = await this.recordLocation(
-      userId,
-      latestLocationDto,
-    );
+    if (latestLocationDto) {
+      const existingLatest = await this.prisma.location.findUnique({
+        where: {
+          userId_devicePointId: {
+            userId,
+            devicePointId: latestLocationDto.devicePointId!,
+          },
+        },
+      });
+      if (existingLatest) {
+        duplicateIds.push(latestLocationDto.devicePointId!);
+        savedLatestLocation = existingLatest;
+      } else {
+        try {
+          savedLatestLocation = await this.recordLocation(userId, latestLocationDto);
+          acceptedIds.push(latestLocationDto.devicePointId!);
+        } catch (error) {
+          const savedAfterError = await this.prisma.location.findUnique({
+            where: {
+              userId_devicePointId: {
+                userId,
+                devicePointId: latestLocationDto.devicePointId!,
+              },
+            },
+          });
+          if (savedAfterError) {
+            acceptedIds.push(latestLocationDto.devicePointId!);
+            savedLatestLocation = savedAfterError;
+          } else {
+            this.logger.error(
+              `Son toplu konum kaydı başarısız: ${latestLocationDto.devicePointId}`,
+              error,
+            );
+            rejectedItems.push({
+              devicePointId: latestLocationDto.devicePointId!,
+              reason: 'storage_error',
+            });
+          }
+        }
+      }
+    }
 
     return {
       success: true,
-      count: locations.length,
+      count: acceptedIds.length + duplicateIds.length,
+      acceptedIds,
+      duplicateIds,
+      rejectedItems,
       latestLocation: savedLatestLocation,
     };
   }
@@ -841,9 +914,6 @@ export class LocationsService {
     return this.prisma.location.findMany({
       where: {
         userId: targetUserId,
-        movementStatus: {
-          not: 'invalid',
-        },
         recordedAt: {
           gte: startOfDay,
           lte: endOfDay,
@@ -861,6 +931,12 @@ export class LocationsService {
         speed: true,
         accuracy: true,
         connectionStatus: true,
+        movementStatus: true,
+        receivedAt: true,
+        devicePointId: true,
+        filterVersion: true,
+        deliveryMode: true,
+        deferredReason: true,
       },
     });
   }
@@ -971,6 +1047,7 @@ export class LocationsService {
     userId: string,
     familyId: string,
     targetUserId: string,
+    dateStr?: string,
   ) {
     // Ailede üyelik kontrolü
     const isMember = await this.prisma.familyMember.findUnique({
@@ -982,9 +1059,9 @@ export class LocationsService {
       },
     });
 
-    if (!isMember) {
+    if (!isMember || isMember.memberType !== MemberType.guardian) {
       throw new ForbiddenException(
-        'Bu aile grubunun verilerine erişim yetkiniz yok.',
+        'Bu işlem için ailede veli yetkisi gereklidir.',
       );
     }
 
@@ -1004,9 +1081,20 @@ export class LocationsService {
       );
     }
 
-    const { startOfDay, endOfDay } = this.getIstanbulDayRangeUtc();
+    if (userId !== targetUserId && !this.isTrackableMember(targetMember)) {
+      throw new ForbiddenException('Bu üyenin takip verilerine erişim yetkiniz yok.');
+    }
+    const dateKey = dateStr === undefined ? this.getIstanbulDateKey() : dateStr;
+    if (typeof dateKey !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+      throw new BadRequestException('Tarih YYYY-MM-DD biçiminde olmalıdır.');
+    }
+    const parsed = new Date(dateKey + 'T00:00:00.000Z');
+    if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== dateKey || dateKey > this.getIstanbulDateKey()) {
+      throw new BadRequestException('Geçerli bir geçmiş gün veya bugün seçilmelidir.');
+    }
+    const { startOfDay, endOfDay } = this.getIstanbulDayRangeUtc(dateKey);
 
-    return this.prisma.location.deleteMany({
+    const result = await this.prisma.location.deleteMany({
       where: {
         userId: targetUserId,
         recordedAt: {
@@ -1015,6 +1103,8 @@ export class LocationsService {
         },
       },
     });
+    this.logger.log(`Route reset: actor=${userId} family=${familyId} target=${targetUserId} date=${dateKey} count=${result.count}`);
+    return { count: result.count, date: dateKey, timezone: 'Europe/Istanbul' };
   }
 
   async triggerTestLocationEvent(
