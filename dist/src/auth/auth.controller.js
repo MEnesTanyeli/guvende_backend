@@ -50,6 +50,14 @@ __decorate([
     (0, class_validator_1.MinLength)(6, { message: 'Yeni şifreniz en az 6 karakter olmalıdır.' }),
     __metadata("design:type", String)
 ], ResetPasswordDto.prototype, "newPassword", void 0);
+class ConfirmChildElderLogoutDto {
+    code;
+}
+__decorate([
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.Matches)(/^\d{6}$/, { message: 'Doğrulama kodu 6 haneli olmalıdır.' }),
+    __metadata("design:type", String)
+], ConfirmChildElderLogoutDto.prototype, "code", void 0);
 let AuthController = class AuthController {
     authService;
     constructor(authService) {
@@ -73,10 +81,25 @@ let AuthController = class AuthController {
     async refresh(dto) {
         return this.authService.refresh(dto.refreshToken);
     }
-    async logout(user) {
+    logout(user) {
+        if (!user.sessionId) {
+            throw new common_1.UnauthorizedException('Oturum bilgisi bulunamadı.');
+        }
         return this.authService.logout(user.sessionId);
     }
-    async logoutAll(user) {
+    requestChildElderLogoutApproval(user) {
+        if (!user.sessionId) {
+            throw new common_1.UnauthorizedException('Oturum bilgisi bulunamadı.');
+        }
+        return this.authService.requestChildElderLogoutApproval(user.id, user.sessionId);
+    }
+    confirmChildElderLogout(user, dto) {
+        if (!user.sessionId) {
+            throw new common_1.UnauthorizedException('Oturum bilgisi bulunamadı.');
+        }
+        return this.authService.confirmChildElderLogout(user.id, user.sessionId, dto.code);
+    }
+    logoutAll(user) {
         return this.authService.logoutAll(user.id);
     }
     async forgotPassword(dto) {
@@ -85,7 +108,7 @@ let AuthController = class AuthController {
     async resetPassword(dto) {
         return this.authService.resetPassword(dto);
     }
-    async getMe(user) {
+    getMe(user) {
         return user;
     }
 };
@@ -136,15 +159,34 @@ __decorate([
     __param(0, (0, get_user_decorator_1.GetUser)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
-    __metadata("design:returntype", Promise)
+    __metadata("design:returntype", void 0)
 ], AuthController.prototype, "logout", null);
+__decorate([
+    (0, throttler_1.Throttle)({ default: { limit: 5, ttl: 15 * 60_000 } }),
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Post)('logout/approval'),
+    __param(0, (0, get_user_decorator_1.GetUser)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "requestChildElderLogoutApproval", null);
+__decorate([
+    (0, throttler_1.Throttle)({ default: { limit: 10, ttl: 15 * 60_000 } }),
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Post)('logout/confirm'),
+    __param(0, (0, get_user_decorator_1.GetUser)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, ConfirmChildElderLogoutDto]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "confirmChildElderLogout", null);
 __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, common_1.Post)('logout-all'),
     __param(0, (0, get_user_decorator_1.GetUser)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
-    __metadata("design:returntype", Promise)
+    __metadata("design:returntype", void 0)
 ], AuthController.prototype, "logoutAll", null);
 __decorate([
     (0, throttler_1.Throttle)({ default: { limit: 10, ttl: 15 * 60_000 } }),
@@ -168,7 +210,7 @@ __decorate([
     __param(0, (0, get_user_decorator_1.GetUser)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
-    __metadata("design:returntype", Promise)
+    __metadata("design:returntype", void 0)
 ], AuthController.prototype, "getMe", null);
 exports.AuthController = AuthController = __decorate([
     (0, common_1.Controller)('auth'),

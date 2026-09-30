@@ -3,7 +3,7 @@ export declare class ActivityService {
     private prisma;
     constructor(prisma: PrismaService);
     private getDistanceInMeters;
-    getDailyActivity(userId: string, dateStr?: string): Promise<{
+    getDailyActivity(requesterId: string, targetUserId: string, dateStr?: string): Promise<{
         id: string;
         createdAt: Date;
         userId: string;
@@ -12,5 +12,5 @@ export declare class ActivityService {
         activeMinutes: number;
         visitedPlacesCount: number;
     }>;
-    checkCommonFamily(userId: string, targetUserId: string): Promise<boolean>;
+    private calculateDailyActivity;
 }

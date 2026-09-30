@@ -7,12 +7,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UpdateBatteryDto } from './dto/update-battery.dto';
 import { AlertType, MemberType } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
+import { SubscriptionEntitlementService } from '../common/subscription-entitlement.service';
 
 @Injectable()
 export class BatteryService {
   constructor(
     private prisma: PrismaService,
     private notificationsService: NotificationsService,
+    private subscriptionEntitlement: SubscriptionEntitlementService,
   ) {}
 
   private isTrackableMember(member: {
@@ -71,16 +73,27 @@ export class BatteryService {
         guardianTrackingEnabled: true,
       },
     });
-    const trackableMemberships = memberships.filter((membership) =>
-      this.isTrackableMember(membership),
-    );
+    const trackableMemberships = (
+      await Promise.all(
+        memberships
+          .filter((membership) => this.isTrackableMember(membership))
+          .map(async (membership) => ({
+            membership,
+            entitled: await this.subscriptionEntitlement.isFamilyEntitled(
+              membership.familyId,
+            ),
+          })),
+      )
+    )
+      .filter(({ entitled }) => entitled)
+      .map(({ membership }) => membership);
 
     // Dusuk sarj kontrolleri
     if (dto.batteryLevel <= 15 && !dto.isCharging) {
       const alertTitle = 'Dusuk Sarj Uyarisi';
       const alertMsg = `${user.name} adli aile uyesinin sarji %${dto.batteryLevel} seviyesine dustu!`;
 
-        await this.notificationsService.raiseUserAlertForFamilies({
+      await this.notificationsService.raiseUserAlertForFamilies({
         familyIds: trackableMemberships.map(
           (membership) => membership.familyId,
         ),

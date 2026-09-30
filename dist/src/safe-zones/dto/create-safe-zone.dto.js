@@ -20,20 +20,26 @@ class CreateSafeZoneDto {
 exports.CreateSafeZoneDto = CreateSafeZoneDto;
 __decorate([
     (0, class_validator_1.IsString)(),
+    (0, class_validator_1.MaxLength)(100),
     (0, class_validator_1.IsNotEmpty)({ message: 'Bölge ismi boş bırakılamaz.' }),
     __metadata("design:type", String)
 ], CreateSafeZoneDto.prototype, "name", void 0);
 __decorate([
     (0, class_validator_1.IsNumber)({}, { message: 'Enlem (latitude) geçerli bir sayı olmalıdır.' }),
+    (0, class_validator_1.Min)(-90),
+    (0, class_validator_1.Max)(90),
     __metadata("design:type", Number)
 ], CreateSafeZoneDto.prototype, "latitude", void 0);
 __decorate([
     (0, class_validator_1.IsNumber)({}, { message: 'Boylam (longitude) geçerli bir sayı olmalıdır.' }),
+    (0, class_validator_1.Min)(-180),
+    (0, class_validator_1.Max)(180),
     __metadata("design:type", Number)
 ], CreateSafeZoneDto.prototype, "longitude", void 0);
 __decorate([
     (0, class_validator_1.IsNumber)({}, { message: 'Yarıçap (radius) geçerli bir sayı olmalıdır.' }),
     (0, class_validator_1.Min)(10, { message: 'Yarıçap en az 10 metre olmalıdır.' }),
+    (0, class_validator_1.Max)(10000),
     __metadata("design:type", Number)
 ], CreateSafeZoneDto.prototype, "radius", void 0);
 //# sourceMappingURL=create-safe-zone.dto.js.map

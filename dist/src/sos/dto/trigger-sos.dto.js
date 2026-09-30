@@ -12,11 +12,16 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.TriggerSosDto = void 0;
 const class_validator_1 = require("class-validator");
 class TriggerSosDto {
+    eventId;
     latitude;
     longitude;
     message;
 }
 exports.TriggerSosDto = TriggerSosDto;
+__decorate([
+    (0, class_validator_1.IsUUID)('4', { message: 'eventId geçerli bir UUID v4 olmalıdır.' }),
+    __metadata("design:type", String)
+], TriggerSosDto.prototype, "eventId", void 0);
 __decorate([
     (0, class_validator_1.IsNumber)({}, { message: 'Enlem (latitude) geçerli bir sayı olmalıdır.' }),
     (0, class_validator_1.IsNotEmpty)({ message: 'Enlem boş bırakılamaz.' }),

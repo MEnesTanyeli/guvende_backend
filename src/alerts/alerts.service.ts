@@ -5,12 +5,17 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AlertStatus, MemberType } from '@prisma/client';
+import { SubscriptionEntitlementService } from '../common/subscription-entitlement.service';
 
 @Injectable()
 export class AlertsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private subscriptionEntitlement: SubscriptionEntitlementService,
+  ) {}
 
   async findAll(userId: string, familyId: string) {
+    await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
     // Aile grubuna üye olduğunu doğrula
     const membership = await this.prisma.familyMember.findUnique({
       where: {
@@ -42,7 +47,6 @@ export class AlertsService {
           select: {
             id: true,
             name: true,
-            email: true,
           },
         },
       },
@@ -60,6 +64,8 @@ export class AlertsService {
     if (!alert) {
       throw new NotFoundException('Alarm bulunamadı.');
     }
+
+    await this.subscriptionEntitlement.assertFamilyEntitled(alert.familyId);
 
     // Aile grubu üyeliği ve gardiyan rolünü doğrula
     const membership = await this.prisma.familyMember.findUnique({
@@ -93,6 +99,7 @@ export class AlertsService {
   }
 
   async resolveAll(userId: string, familyId: string) {
+    await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
     // Aile grubu üyeliği ve gardiyan rolünü doğrula
     const membership = await this.prisma.familyMember.findUnique({
       where: {

@@ -1,4 +1,9 @@
 import { UsersService } from './users.service';
+import { SetProxyDto } from './dto/set-proxy.dto';
+import { UpdateDevicePermissionsDto } from './dto/update-device-permissions.dto';
+declare class DeleteAccountDto {
+    password: string;
+}
 declare class UpdateProfileDto {
     name?: string;
     phone?: string;
@@ -7,6 +12,13 @@ declare class UpdateProfileDto {
 export declare class UsersController {
     private usersService;
     constructor(usersService: UsersService);
+    deletionInfo(userId: string): Promise<{
+        ownsFamilies: boolean;
+        hasActiveEntitlement: boolean;
+    }>;
+    deleteAccount(userId: string, dto: DeleteAccountDto): Promise<{
+        success: boolean;
+    }>;
     getProfile(userId: string): Promise<{
         id: string;
         email: string;
@@ -51,9 +63,7 @@ export declare class UsersController {
         devicePermissions: import("@prisma/client/runtime/library").JsonValue;
         createdAt: Date;
     }>;
-    setProxy(userId: string, body: {
-        email: string;
-    }): Promise<{
+    setProxy(userId: string, dto: SetProxyDto): Promise<{
         id: string;
         email: string;
         name: string;
@@ -122,7 +132,7 @@ export declare class UsersController {
     resetDevice(guardianId: string, childId: string): Promise<{
         message: string;
     }>;
-    updateDevicePermissions(userId: string, dto: any): Promise<{
+    updateDevicePermissions(userId: string, dto: UpdateDevicePermissionsDto): Promise<{
         success: boolean;
     }>;
 }

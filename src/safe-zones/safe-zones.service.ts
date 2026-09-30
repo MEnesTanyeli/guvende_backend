@@ -6,12 +6,17 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSafeZoneDto } from './dto/create-safe-zone.dto';
 import { MemberType } from '@prisma/client';
+import { SubscriptionEntitlementService } from '../common/subscription-entitlement.service';
 
 @Injectable()
 export class SafeZonesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private subscriptionEntitlement: SubscriptionEntitlementService,
+  ) {}
 
   async create(userId: string, familyId: string, dto: CreateSafeZoneDto) {
+    await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
     // Aile grubuna üyelik kontrolü
     const membership = await this.prisma.familyMember.findUnique({
       where: {
@@ -46,6 +51,7 @@ export class SafeZonesService {
   }
 
   async findAll(userId: string, familyId: string) {
+    await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
     const membership = await this.prisma.familyMember.findUnique({
       where: {
         familyId_userId: {
@@ -57,6 +63,12 @@ export class SafeZonesService {
 
     if (!membership) {
       throw new ForbiddenException('Bu aile grubuna erişim yetkiniz yok.');
+    }
+
+    if (membership.memberType !== MemberType.guardian) {
+      throw new ForbiddenException(
+        'Guvenli bolgeleri sadece koruyucu (guardian) uyeler goruntuleyebilir.',
+      );
     }
 
     return this.prisma.safeZone.findMany({
@@ -77,6 +89,8 @@ export class SafeZonesService {
     if (!safeZone) {
       throw new NotFoundException('Güvenli bölge bulunamadı.');
     }
+
+    await this.subscriptionEntitlement.assertFamilyEntitled(safeZone.familyId);
 
     const membership = await this.prisma.familyMember.findUnique({
       where: {

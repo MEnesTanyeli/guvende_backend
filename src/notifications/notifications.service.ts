@@ -289,7 +289,8 @@ export class NotificationsService {
       where: {
         familyId,
         userId: { not: senderId },
-        muteNotifications: false,
+        ...(data?.type === AlertType.sos || data?.action === 'audible_warning_unanswered'
+          ? {} : { muteNotifications: false }),
         memberType: 'guardian',
       },
       select: {

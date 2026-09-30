@@ -33,7 +33,9 @@ __decorate([
 __decorate([
     (0, class_validator_1.IsString)(),
     (0, class_validator_1.IsOptional)(),
-    (0, class_validator_1.Matches)(/^[0-2][0-9]:[0-5][0-9]$/, { message: 'Saat formatı HH:MM olmalıdır.' }),
+    (0, class_validator_1.Matches)(/^[0-2][0-9]:[0-5][0-9]$/, {
+        message: 'Saat formatı HH:MM olmalıdır.',
+    }),
     __metadata("design:type", String)
 ], UpdateMedicationDto.prototype, "time", void 0);
 __decorate([

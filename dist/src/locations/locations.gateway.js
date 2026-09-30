@@ -52,19 +52,87 @@ const socket_io_1 = require("socket.io");
 const prisma_service_1 = require("../prisma/prisma.service");
 const jwt_1 = require("@nestjs/jwt");
 const https = __importStar(require("https"));
+const subscription_entitlement_service_1 = require("../common/subscription-entitlement.service");
 let LocationsGateway = class LocationsGateway {
     prisma;
     jwtService;
+    subscriptionEntitlement;
     logger = new common_1.Logger('LocationsGateway');
     activeUsers = new Map();
     server;
-    constructor(prisma, jwtService) {
+    constructor(prisma, jwtService, subscriptionEntitlement) {
         this.prisma = prisma;
         this.jwtService = jwtService;
+        this.subscriptionEntitlement = subscriptionEntitlement;
+    }
+    disconnectUser(userId) {
+        const socketIds = new Set(this.activeUsers.get(userId) ?? []);
+        for (const socket of this.server?.sockets.sockets.values() ?? []) {
+            if (socket.data.userId === userId)
+                socketIds.add(socket.id);
+        }
+        for (const socketId of socketIds) {
+            const socket = this.server?.sockets.sockets.get(socketId);
+            if (!socket || socket.data.userId !== userId)
+                continue;
+            this.disconnectSocket(socket, userId);
+        }
+    }
+    disconnectSessions(userId, sessionIds) {
+        const revokedSessionIds = new Set(sessionIds);
+        if (revokedSessionIds.size === 0)
+            return;
+        const socketIds = new Set(this.activeUsers.get(userId) ?? []);
+        for (const socket of this.server?.sockets.sockets.values() ?? []) {
+            if (socket.data.userId === userId)
+                socketIds.add(socket.id);
+        }
+        for (const socketId of socketIds) {
+            const socket = this.server?.sockets.sockets.get(socketId);
+            if (!socket ||
+                socket.data.userId !== userId ||
+                !socket.data.sessionId ||
+                !revokedSessionIds.has(socket.data.sessionId)) {
+                continue;
+            }
+            this.disconnectSocket(socket, userId, socket.data.sessionId);
+        }
+    }
+    disconnectSocket(socket, userId, sessionId) {
+        try {
+            socket.disconnect(true);
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.logger.error(`Socket iptal baglantisi kesilemedi: user=${userId} session=${sessionId ?? 'all'} socket=${socket.id}: ${message}`);
+        }
+    }
+    clearFamilyRoom(familyId) {
+        const room = `family_${familyId}`;
+        this.server?.in(room).socketsLeave(room);
     }
     isUserConnected(userId) {
         const userSockets = this.activeUsers.get(userId);
         return !!(userSockets && userSockets.size > 0);
+    }
+    async revokeFamilyAccess(userId, familyId) {
+        const socketIds = this.activeUsers.get(userId);
+        if (!socketIds || socketIds.size === 0)
+            return;
+        const room = `family_${familyId}`;
+        for (const socketId of socketIds) {
+            const socket = this.server?.sockets.sockets.get(socketId);
+            if (!socket)
+                continue;
+            try {
+                await socket.leave(room);
+                this.logger.log(`Kullanici (${userId}) aile odasindan cikarildi: ${room} | socket: ${socketId}`);
+            }
+            catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                this.logger.error(`Aile odasi erisimi iptal edilemedi: user=${userId} room=${room} socket=${socketId}: ${message}`);
+            }
+        }
     }
     async sendPushNotification(userIds, title, message, data) {
         const appId = process.env.ONESIGNAL_APP_ID;
@@ -165,14 +233,17 @@ let LocationsGateway = class LocationsGateway {
     }
     async handleConnection(client) {
         try {
-            const authHeader = client.handshake.auth?.token || client.handshake.headers?.authorization;
+            const handshakeAuth = client.handshake.auth;
+            const authToken = handshakeAuth.token;
+            const headerToken = client.handshake.headers.authorization;
+            const authHeader = typeof authToken === 'string' ? authToken : headerToken;
             let token = '';
             if (authHeader && authHeader.startsWith('Bearer ')) {
                 token = authHeader.split(' ')[1];
             }
             else {
                 const queryToken = client.handshake.query.token;
-                if (queryToken) {
+                if (typeof queryToken === 'string') {
                     token = queryToken;
                 }
             }
@@ -204,22 +275,24 @@ let LocationsGateway = class LocationsGateway {
             }
             client.data.userId = userId;
             client.data.sessionId = session.id;
-            client.use(async (_packet, next) => {
-                const activeSession = await this.prisma.session.findFirst({
-                    where: {
-                        id: client.data.sessionId,
-                        userId: client.data.userId,
-                        revokedAt: null,
-                        expiresAt: { gt: new Date() },
-                    },
-                    select: { id: true },
-                });
-                if (!activeSession) {
-                    client.disconnect(true);
-                    next(new Error('Oturum kapatılmış veya süresi dolmuş.'));
-                    return;
-                }
-                next();
+            client.use((_packet, next) => {
+                void (async () => {
+                    const activeSession = await this.prisma.session.findFirst({
+                        where: {
+                            id: client.data.sessionId,
+                            userId: client.data.userId,
+                            revokedAt: null,
+                            expiresAt: { gt: new Date() },
+                        },
+                        select: { id: true },
+                    });
+                    if (!activeSession) {
+                        client.disconnect(true);
+                        next(new Error('Oturum kapatılmış veya süresi dolmuş.'));
+                        return;
+                    }
+                    next();
+                })();
             });
             if (payload.exp) {
                 const remainingMs = Math.max(0, payload.exp * 1000 - Date.now());
@@ -233,9 +306,21 @@ let LocationsGateway = class LocationsGateway {
             userSockets.add(client.id);
             this.logger.log(`Kullanıcı (${userId}) soket bağlantısı kurdu: ${client.id}`);
             await this.updateUserConnectionStatus(userId, 'online');
+            const stillActive = await this.prisma.session.findFirst({
+                where: {
+                    id: session.id,
+                    userId,
+                    revokedAt: null,
+                    expiresAt: { gt: new Date() },
+                },
+                select: { id: true },
+            });
+            if (!stillActive)
+                client.disconnect(true);
         }
         catch (err) {
-            this.logger.error(`Soket bağlantısı doğrulanamadı: ${err.message}. Cihaz: ${client.id}`);
+            const message = err instanceof Error ? err.message : String(err);
+            this.logger.error(`Soket bağlantısı doğrulanamadı: ${message}. Cihaz: ${client.id}`);
             client.disconnect(true);
         }
     }
@@ -316,10 +401,24 @@ let LocationsGateway = class LocationsGateway {
                 message: 'Bu aile odasına katılma yetkiniz yok.',
             };
         }
+        if (!(await this.subscriptionEntitlement.isFamilyEntitled(data.familyId))) {
+            return {
+                status: 'error',
+                message: 'Bu ailenin premium takip erişimi aktif değil.',
+            };
+        }
         const room = `family_${data.familyId}`;
-        client.join(room);
+        await client.join(room);
+        const stillMember = await this.prisma.familyMember.findUnique({
+            where: { familyId_userId: { familyId: data.familyId, userId } },
+            select: { id: true },
+        });
+        if (!stillMember) {
+            await client.leave(room);
+            return { status: 'error', message: 'Aile erisimi kaldirildi.' };
+        }
         this.logger.log(`İstemci (${client.id}), odaya katıldı: ${room}`);
-        return { status: 'success', room };
+        return { status: 'success' };
     }
     async handleJoinAdminControlRoom(client) {
         const userId = client.data.userId;
@@ -328,39 +427,82 @@ let LocationsGateway = class LocationsGateway {
         }
         const user = await this.prisma.user.findUnique({
             where: { id: userId },
-            select: { role: true }
+            select: { role: true },
         });
         if (!user || user.role !== 'admin') {
             return { status: 'error', message: 'Sadece yöneticiler katılabilir.' };
         }
-        client.join('admin_control_room');
+        void client.join('admin_control_room');
         this.logger.log(`İstemci (${client.id}), admin_control_room odasına katıldı.`);
         return { status: 'success' };
     }
-    async handleLeaveFamily(data, client) {
+    handleLeaveFamily(data, client) {
         const userId = client.data.userId;
         if (!userId) {
             return { status: 'error', message: 'Yetkisiz erişim' };
         }
         const room = `family_${data.familyId}`;
-        client.leave(room);
+        void client.leave(room);
         this.logger.log(`İstemci (${client.id} - ${userId}), odadan ayrıldı: ${room}`);
-        return { status: 'success', room };
+        return { status: 'success' };
     }
-    async handleSendDeviceLock(data, client) {
+    handleSendDeviceLock() {
         return {
             status: 'error',
             message: 'Cihaz kilitleme özelliği devre dışı bırakılmıştır.',
         };
     }
-    sendLocationUpdate(familyId, locationData) {
+    async sendLocationUpdate(familyId, locationData, subscriptionExempt = false) {
+        if (!subscriptionExempt &&
+            !(await this.subscriptionEntitlement.isFamilyEntitled(familyId))) {
+            return;
+        }
         const room = `family_${familyId}`;
-        this.server.to(room).emit('location_update', locationData);
+        const senderId = locationData.userId;
+        if (typeof senderId !== 'string') {
+            this.logger.warn(`Konum yayini reddedildi: gecerli bir kullanici kimligi yok. family=${familyId}`);
+            return;
+        }
+        const members = await this.prisma.familyMember.findMany({
+            where: { familyId },
+            select: {
+                userId: true,
+                memberType: true,
+                guardianTrackingEnabled: true,
+            },
+        });
+        const sender = members.find((member) => member.userId === senderId);
+        if (!sender) {
+            this.logger.warn(`Konum yayini reddedildi: gonderen aile uyesi degil. user=${senderId} family=${familyId}`);
+            return;
+        }
+        const canGuardiansReceive = sender.memberType !== 'guardian' || sender.guardianTrackingEnabled;
+        if (canGuardiansReceive) {
+            for (const recipient of members) {
+                if (recipient.userId === senderId ||
+                    recipient.memberType !== 'guardian') {
+                    continue;
+                }
+                const socketIds = this.activeUsers.get(recipient.userId);
+                if (!socketIds)
+                    continue;
+                for (const socketId of socketIds) {
+                    const socket = this.server?.sockets.sockets.get(socketId);
+                    if (socket?.rooms.has(room)) {
+                        socket.emit('location_update', locationData);
+                    }
+                }
+            }
+        }
         this.server.to('admin_control_room').emit('location_update', locationData);
         this.logger.log(`Odaya (${room}) ve admin_control_room odasına yeni konum yayını yapıldı: ${JSON.stringify(locationData.userId)}`);
     }
     async sendAlertNotification(familyId, alertData) {
         try {
+            if (alertData.type !== 'sos' &&
+                !(await this.subscriptionEntitlement.isFamilyEntitled(familyId))) {
+                return;
+            }
             const senderId = alertData.senderId || alertData.userId || alertData.data?.userId;
             const guardians = await this.prisma.familyMember.findMany({
                 where: {
@@ -378,12 +520,33 @@ let LocationsGateway = class LocationsGateway {
             for (const guardian of targetGuardians) {
                 this.sendEventToUser(guardian.userId, 'alert_notification', alertData);
             }
-            this.server.to('admin_control_room').emit('alert_notification', alertData);
+            this.server
+                .to('admin_control_room')
+                .emit('alert_notification', alertData);
             this.logger.log(`Aile Grubu (${familyId}) için velilere (${targetGuardians.length} kişi) ve admin_control_room odasına alarm bildirimi iletildi: ${alertData.title}`);
         }
         catch (err) {
-            this.logger.error(`Alarm bildirimi velilere gönderilirken hata oluştu: ${err.message}`);
+            const message = err instanceof Error ? err.message : String(err);
+            this.logger.error(`Alarm bildirimi velilere gönderilirken hata oluştu: ${message}`);
         }
+    }
+    handleVideoCallRequestDisabled() {
+        return {
+            status: 'disabled',
+            message: 'Goruntulu arama ozelligi gecici olarak kapali.',
+        };
+    }
+    handleVideoCallResponseDisabled() {
+        return {
+            status: 'disabled',
+            message: 'Goruntulu arama ozelligi gecici olarak kapali.',
+        };
+    }
+    handleWebRTCSignalDisabled() {
+        return {
+            status: 'disabled',
+            message: 'Goruntulu arama ozelligi gecici olarak kapali.',
+        };
     }
     sendEventToUser(userId, event, data) {
         const sockets = this.activeUsers.get(userId);
@@ -408,14 +571,14 @@ __decorate([
     __param(0, (0, websockets_1.MessageBody)()),
     __param(1, (0, websockets_1.ConnectedSocket)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, socket_io_1.Socket]),
+    __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", Promise)
 ], LocationsGateway.prototype, "handleJoinFamily", null);
 __decorate([
     (0, websockets_1.SubscribeMessage)('joinAdminControlRoom'),
     __param(0, (0, websockets_1.ConnectedSocket)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [socket_io_1.Socket]),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], LocationsGateway.prototype, "handleJoinAdminControlRoom", null);
 __decorate([
@@ -423,17 +586,33 @@ __decorate([
     __param(0, (0, websockets_1.MessageBody)()),
     __param(1, (0, websockets_1.ConnectedSocket)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, socket_io_1.Socket]),
-    __metadata("design:returntype", Promise)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
 ], LocationsGateway.prototype, "handleLeaveFamily", null);
 __decorate([
     (0, websockets_1.SubscribeMessage)('sendDeviceLock'),
-    __param(0, (0, websockets_1.MessageBody)()),
-    __param(1, (0, websockets_1.ConnectedSocket)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, socket_io_1.Socket]),
-    __metadata("design:returntype", Promise)
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
 ], LocationsGateway.prototype, "handleSendDeviceLock", null);
+__decorate([
+    (0, websockets_1.SubscribeMessage)('video_call_request'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], LocationsGateway.prototype, "handleVideoCallRequestDisabled", null);
+__decorate([
+    (0, websockets_1.SubscribeMessage)('video_call_response'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], LocationsGateway.prototype, "handleVideoCallResponseDisabled", null);
+__decorate([
+    (0, websockets_1.SubscribeMessage)('webrtc_signal'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], LocationsGateway.prototype, "handleWebRTCSignalDisabled", null);
 exports.LocationsGateway = LocationsGateway = __decorate([
     (0, websockets_1.WebSocketGateway)({
         cors: {
@@ -444,6 +623,7 @@ exports.LocationsGateway = LocationsGateway = __decorate([
         },
     }),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
-        jwt_1.JwtService])
+        jwt_1.JwtService,
+        subscription_entitlement_service_1.SubscriptionEntitlementService])
 ], LocationsGateway);
 //# sourceMappingURL=locations.gateway.js.map

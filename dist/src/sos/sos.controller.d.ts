@@ -5,6 +5,16 @@ export declare class SosController {
     constructor(sosService: SosService);
     triggerSos(userId: string, dto: TriggerSosDto): Promise<{
         message: string;
-        events: any[];
+        events: {
+            id: string;
+            createdAt: Date;
+            message: string | null;
+            userId: string;
+            latitude: number;
+            longitude: number;
+            familyId: string;
+            eventId: string | null;
+        }[];
+        idempotent: boolean;
     }>;
 }

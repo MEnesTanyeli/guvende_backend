@@ -11,20 +11,13 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.JoinFamilyDto = void 0;
 const class_validator_1 = require("class-validator");
-const client_1 = require("@prisma/client");
 class JoinFamilyDto {
-    familyId;
-    memberType;
+    inviteCode;
 }
 exports.JoinFamilyDto = JoinFamilyDto;
 __decorate([
     (0, class_validator_1.IsString)(),
-    (0, class_validator_1.IsNotEmpty)({ message: 'Aile kodu / kimliği boş bırakılamaz.' }),
+    (0, class_validator_1.IsNotEmpty)({ message: 'Aile davet kodu boş bırakılamaz.' }),
     __metadata("design:type", String)
-], JoinFamilyDto.prototype, "familyId", void 0);
-__decorate([
-    (0, class_validator_1.IsEnum)(client_1.MemberType, { message: 'Geçersiz üye tipi (guardian, child, elder).' }),
-    (0, class_validator_1.IsOptional)(),
-    __metadata("design:type", String)
-], JoinFamilyDto.prototype, "memberType", void 0);
+], JoinFamilyDto.prototype, "inviteCode", void 0);
 //# sourceMappingURL=join-family.dto.js.map

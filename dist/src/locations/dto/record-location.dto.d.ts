@@ -7,6 +7,12 @@ export declare class RecordLocationDto {
     isCharging?: boolean;
     connectionStatus?: string;
     recordedAt?: string;
+    measuredAt?: string;
+    devicePointId?: string;
+    filterVersion?: string;
+    movementStatus?: 'unknown' | 'moving' | 'stationary';
+    deliveryMode?: 'live' | 'deferred';
+    deferredReason?: 'offline' | 'timeout' | 'server_error' | 'app_restart';
     insideZoneId?: string;
     insideZoneName?: string;
 }

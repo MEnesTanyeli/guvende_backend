@@ -1,5 +1,7 @@
+import { Throttle } from '@nestjs/throttler';
 import {
   Body,
+  Delete,
   Controller,
   Get,
   Param,
@@ -10,9 +12,15 @@ import {
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { GetUser } from '../auth/decorators/get-user.decorator';
-import { IsOptional, IsString } from 'class-validator';
+import { IsOptional, IsString, IsNotEmpty } from 'class-validator';
 import { SetProxyDto } from './dto/set-proxy.dto';
 import { UpdateDevicePermissionsDto } from './dto/update-device-permissions.dto';
+
+class DeleteAccountDto {
+  @IsString()
+  @IsNotEmpty()
+  password: string;
+}
 
 class UpdateProfileDto {
   @IsString()
@@ -32,6 +40,17 @@ class UpdateProfileDto {
 @Controller('users')
 export class UsersController {
   constructor(private usersService: UsersService) {}
+
+  @Get('account/deletion-info')
+  deletionInfo(@GetUser('id') userId: string) {
+    return this.usersService.accountDeletionInfo(userId);
+  }
+
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Delete('account')
+  deleteAccount(@GetUser('id') userId: string, @Body() dto: DeleteAccountDto) {
+    return this.usersService.deleteAccount(userId, dto.password);
+  }
 
   @Get('profile')
   async getProfile(@GetUser('id') userId: string) {

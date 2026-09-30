@@ -1,6 +1,7 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import { MemberType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { assertCanReadTrackingData } from '../common/tracking-data-authorization';
 
 interface AppUsageSnapshotItem {
   packageName: string;
@@ -42,6 +43,13 @@ export class AppUsageService {
         : this.getIstanbulDateKey();
     const [year, month, day] = dateKey.split('-').map(Number);
     return new Date(Date.UTC(year, month - 1, day, -3, 0, 0, 0));
+  }
+
+  private getNextIstanbulDayStartUtc(date: Date): Date {
+    const [year, month, day] = this.getIstanbulDateKey(date)
+      .split('-')
+      .map(Number);
+    return new Date(Date.UTC(year, month - 1, day + 1, -3, 0, 0, 0));
   }
 
   async checkCommonFamily(
@@ -127,10 +135,23 @@ export class AppUsageService {
   async getMemberAppUsage(userId: string, targetUserId: string) {
     if (userId !== targetUserId) {
       const isShared = await this.checkCommonFamily(userId, targetUserId);
+      const authorizedFrom = await assertCanReadTrackingData(
+        this.prisma,
+        userId,
+        targetUserId,
+        { includeTemporalBoundary: true },
+      );
       if (!isShared) {
         throw new ForbiddenException(
           'Bu üyenin uygulama kullanım verilerini görme yetkiniz yok.',
         );
+      }
+      if (
+        !authorizedFrom ||
+        this.getIstanbulDayStartUtc() <
+          this.getNextIstanbulDayStartUtc(authorizedFrom)
+      ) {
+        return [];
       }
     }
 

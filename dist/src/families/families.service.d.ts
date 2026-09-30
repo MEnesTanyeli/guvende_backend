@@ -2,92 +2,125 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateFamilyDto } from './dto/create-family.dto';
 import { JoinFamilyDto } from './dto/join-family.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { LocationsGateway } from '../locations/locations.gateway';
+import { OfflineSosService } from '../offline-sos/offline-sos.service';
+import { SubscriptionEntitlementService } from '../common/subscription-entitlement.service';
 export declare class FamiliesService {
     private prisma;
     private notificationsService;
+    private locationsGateway;
+    private offlineSosService;
+    private subscriptionEntitlement;
     private readonly inviteCodeAlphabet;
-    constructor(prisma: PrismaService, notificationsService: NotificationsService);
+    constructor(prisma: PrismaService, notificationsService: NotificationsService, locationsGateway: LocationsGateway, offlineSosService: OfflineSosService, subscriptionEntitlement: SubscriptionEntitlementService);
     private createInviteCode;
+    private createSosEncryptionKey;
+    private lockUserMembership;
+    private lockFamilyMembership;
+    private dissolveOwnedFamily;
     private generateUniqueInviteCode;
+    private isInviteCodeUniqueCollision;
+    private retryInviteCodeWrite;
     create(userId: string, dto: CreateFamilyDto): Promise<{
+        id: string;
+        name: string;
+        type: string;
+        ownerId: string;
+        createdAt: Date;
+        updatedAt: Date;
+        inviteCode: string | null;
+    }>;
+    findAll(userId: string): Promise<{
         id: string;
         name: string;
         createdAt: Date;
         updatedAt: Date;
-        inviteCode: string | null;
-        type: string;
-        ownerId: string;
-    }>;
-    findAll(userId: string): Promise<({
         _count: {
             members: number;
         };
+        type: string;
+        ownerId: string;
         owner: {
             id: string;
-            email: string;
             name: string;
         };
         members: {
             memberType: import(".prisma/client").$Enums.MemberType;
             muteNotifications: boolean;
+            guardianTrackingEnabled: boolean;
         }[];
-    } & {
+    }[]>;
+    offlineSosProvisioning(userId: string, sessionId: string, familyId: string, deviceWrappingPublicKey?: string): Promise<{
+        protocolVersion: number;
+        familyBinding: string;
+        senderBinding: string;
+        keyVersion: number;
+        familyPublicEncryptionKey: string;
+        emergencyContacts: {
+            displayName: string;
+            phone: string;
+        }[];
+        issuedAt: string;
+        refreshAfter: string;
+    } | {
+        decryptionKeys: {
+            keyVersion: number;
+            status: string;
+            retiredAt: string | null;
+            wrappedPrivateKey: string;
+        }[];
+        protocolVersion: number;
+        familyBinding: string;
+        senderBinding: string;
+        keyVersion: number;
+        familyPublicEncryptionKey: string;
+        emergencyContacts: {
+            displayName: string;
+            phone: string;
+        }[];
+        issuedAt: string;
+        refreshAfter: string;
+    }>;
+    findOne(userId: string, familyId: string): Promise<{
+        members: {
+            guardianTrackingEnabled?: boolean | undefined;
+            muteNotifications?: boolean | undefined;
+            id: string;
+            userId: string;
+            memberType: import(".prisma/client").$Enums.MemberType;
+            user: {
+                id: string;
+                name: string;
+            };
+        }[];
         id: string;
         name: string;
         createdAt: Date;
         updatedAt: Date;
-        inviteCode: string | null;
         type: string;
         ownerId: string;
-    })[]>;
-    findOne(userId: string, familyId: string): Promise<{
         owner: {
             id: string;
-            email: string;
             name: string;
         };
-        members: ({
-            user: {
-                id: string;
-                email: string;
-                name: string;
-                phone: string | null;
-                gender: string | null;
-                isLocked: boolean;
-                devicePermissions: import("@prisma/client/runtime/library").JsonValue;
-            };
-        } & {
-            id: string;
-            createdAt: Date;
-            familyId: string;
-            userId: string;
-            memberType: import(".prisma/client").$Enums.MemberType;
-            permissions: string[];
-            muteNotifications: boolean;
-        })[];
         safeZones: {
             id: string;
             name: string;
             createdAt: Date;
-            familyId: string;
             latitude: number;
             longitude: number;
+            familyId: string;
             radius: number;
             createdBy: string;
         }[];
-    } & {
-        id: string;
-        name: string;
-        createdAt: Date;
-        updatedAt: Date;
-        inviteCode: string | null;
-        type: string;
-        ownerId: string;
     }>;
     invite(userId: string, familyId: string): Promise<{
         familyId: string;
-        inviteCode: string;
+        inviteCode: string | null;
         message: string;
+    }>;
+    rotateInviteCode(userId: string, familyId: string): Promise<{
+        inviteCode: string;
     }>;
     join(userId: string, dto: JoinFamilyDto): Promise<{
         family: {
@@ -96,27 +129,12 @@ export declare class FamiliesService {
     } & {
         id: string;
         createdAt: Date;
-        familyId: string;
         userId: string;
+        familyId: string;
         memberType: import(".prisma/client").$Enums.MemberType;
         permissions: string[];
         muteNotifications: boolean;
-    }>;
-    updateMemberRole(userId: string, familyId: string, targetUserId: string, newRole: string): Promise<{
-        user: {
-            id: string;
-            email: string;
-            name: string;
-            gender: string | null;
-        };
-    } & {
-        id: string;
-        createdAt: Date;
-        familyId: string;
-        userId: string;
-        memberType: import(".prisma/client").$Enums.MemberType;
-        permissions: string[];
-        muteNotifications: boolean;
+        guardianTrackingEnabled: boolean;
     }>;
     leave(userId: string, familyId: string): Promise<{
         success: boolean;
@@ -133,10 +151,21 @@ export declare class FamiliesService {
     muteNotifications(userId: string, familyId: string, mute: boolean): Promise<{
         id: string;
         createdAt: Date;
-        familyId: string;
         userId: string;
+        familyId: string;
         memberType: import(".prisma/client").$Enums.MemberType;
         permissions: string[];
         muteNotifications: boolean;
+        guardianTrackingEnabled: boolean;
+    }>;
+    updateOwnTracking(userId: string, familyId: string, enabled: boolean): Promise<{
+        id: string;
+        createdAt: Date;
+        userId: string;
+        familyId: string;
+        memberType: import(".prisma/client").$Enums.MemberType;
+        permissions: string[];
+        muteNotifications: boolean;
+        guardianTrackingEnabled: boolean;
     }>;
 }

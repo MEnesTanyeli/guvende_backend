@@ -7,9 +7,9 @@ export declare class SafeZonesController {
         id: string;
         name: string;
         createdAt: Date;
-        familyId: string;
         latitude: number;
         longitude: number;
+        familyId: string;
         radius: number;
         createdBy: string;
     }>;
@@ -17,9 +17,9 @@ export declare class SafeZonesController {
         id: string;
         name: string;
         createdAt: Date;
-        familyId: string;
         latitude: number;
         longitude: number;
+        familyId: string;
         radius: number;
         createdBy: string;
     }[]>;

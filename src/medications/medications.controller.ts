@@ -29,8 +29,11 @@ export class MedicationsController {
   }
 
   @Get('user/:userId')
-  async getReminders(@Param('userId') userId: string) {
-    return this.medicationsService.getReminders(userId);
+  async getReminders(
+    @GetUser('id') requesterId: string,
+    @Param('userId') targetUserId: string,
+  ) {
+    return this.medicationsService.getReminders(requesterId, targetUserId);
   }
 
   @Delete(':id')

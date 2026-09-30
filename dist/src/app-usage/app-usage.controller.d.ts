@@ -5,14 +5,15 @@ export declare class AppUsageController {
     constructor(appUsageService: AppUsageService);
     saveAppUsage(userId: string, dto: SaveAppUsageDto): Promise<{
         success: boolean;
+        count: number;
     }>;
     getMemberAppUsage(userId: string, memberId: string): Promise<{
         id: string;
         userId: string;
         lastUsedAt: Date;
+        recordedDate: Date;
         packageName: string;
         appName: string;
         durationMin: number;
-        recordedDate: Date;
     }[]>;
 }

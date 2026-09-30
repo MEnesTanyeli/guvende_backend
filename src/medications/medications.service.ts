@@ -9,6 +9,7 @@ import { UpdateMedicationDto } from './dto/update-medication.dto';
 import { UsersService } from '../users/users.service';
 import { AlertType, MemberType } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
+import { SubscriptionEntitlementService } from '../common/subscription-entitlement.service';
 
 @Injectable()
 export class MedicationsService {
@@ -16,6 +17,7 @@ export class MedicationsService {
     private prisma: PrismaService,
     private usersService: UsersService,
     private notificationsService: NotificationsService,
+    private subscriptionEntitlement: SubscriptionEntitlementService,
   ) {}
 
   async createReminder(creatorId: string, dto: CreateMedicationDto) {
@@ -57,6 +59,9 @@ export class MedicationsService {
         'Bu üyeye ilaç hatırlatıcısı ekleme yetkiniz yok.',
       );
     }
+    await this.subscriptionEntitlement.assertFamilyEntitled(
+      commonFamily.familyId,
+    );
 
     return this.prisma.medicationReminder.create({
       data: {
@@ -71,10 +76,56 @@ export class MedicationsService {
     });
   }
 
-  async getReminders(userId: string) {
+  async getReminders(requesterId: string, targetUserId: string) {
+    if (requesterId !== targetUserId) {
+      const authorizedMembership = await this.prisma.familyMember.findFirst({
+        where: {
+          userId: targetUserId,
+          memberType: { in: [MemberType.child, MemberType.elder] },
+          family: {
+            members: {
+              some: {
+                userId: requesterId,
+                memberType: MemberType.guardian,
+              },
+            },
+          },
+        },
+        select: { id: true, familyId: true },
+      });
+
+      if (!authorizedMembership) {
+        // Keep the established 200/[] contract for an unknown target. Existing
+        // users without an authorized guardian relationship are forbidden.
+        const targetUser = await this.prisma.user.findUnique({
+          where: { id: targetUserId },
+          select: { id: true },
+        });
+        if (targetUser) {
+          throw new ForbiddenException(
+            'Bu kullanıcının ilaç bilgilerini görmeye yetkiniz yok.',
+          );
+        }
+      } else {
+        await this.subscriptionEntitlement.assertFamilyEntitled(
+          authorizedMembership.familyId,
+        );
+      }
+    } else {
+      const membership = await this.prisma.familyMember.findFirst({
+        where: { userId: targetUserId },
+        select: { familyId: true },
+      });
+      if (membership) {
+        await this.subscriptionEntitlement.assertFamilyEntitled(
+          membership.familyId,
+        );
+      }
+    }
+
     return this.prisma.medicationReminder.findMany({
       where: {
-        userId,
+        userId: targetUserId,
         isActive: true,
       },
       orderBy: {
@@ -111,6 +162,9 @@ export class MedicationsService {
         'Bu ilaç hatırlatıcısını silme yetkiniz yok.',
       );
     }
+    await this.subscriptionEntitlement.assertFamilyEntitled(
+      commonFamily.familyId,
+    );
 
     return this.prisma.medicationReminder.delete({
       where: { id: reminderId },
@@ -213,6 +267,9 @@ export class MedicationsService {
     if (!commonFamily) {
       throw new ForbiddenException('Bu hatırlatıcıyı düzenleme yetkiniz yok.');
     }
+    await this.subscriptionEntitlement.assertFamilyEntitled(
+      commonFamily.familyId,
+    );
 
     return this.prisma.medicationReminder.update({
       where: { id: reminderId },

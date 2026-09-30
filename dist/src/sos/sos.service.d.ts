@@ -1,7 +1,7 @@
 import { PrismaService } from '../prisma/prisma.service';
-import { TriggerSosDto } from './dto/trigger-sos.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { LocationsGateway } from '../locations/locations.gateway';
+import { TriggerSosDto } from './dto/trigger-sos.dto';
 export declare class SosService {
     private prisma;
     private notificationsService;
@@ -9,6 +9,16 @@ export declare class SosService {
     constructor(prisma: PrismaService, notificationsService: NotificationsService, locationsGateway: LocationsGateway);
     triggerSos(userId: string, dto: TriggerSosDto): Promise<{
         message: string;
-        events: any[];
+        events: {
+            id: string;
+            createdAt: Date;
+            message: string | null;
+            userId: string;
+            latitude: number;
+            longitude: number;
+            familyId: string;
+            eventId: string | null;
+        }[];
+        idempotent: boolean;
     }>;
 }

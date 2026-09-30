@@ -41,6 +41,9 @@ var __importStar = (this && this.__importStar) || (function () {
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
+var __param = (this && this.__param) || function (paramIndex, decorator) {
+    return function (target, key) { decorator(target, key, paramIndex); }
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuthService = void 0;
 const common_1 = require("@nestjs/common");
@@ -50,162 +53,207 @@ const bcrypt = __importStar(require("bcrypt"));
 const prisma_service_1 = require("../prisma/prisma.service");
 const users_service_1 = require("../users/users.service");
 const mail_service_1 = require("../mail/mail.service");
+const locations_gateway_1 = require("../locations/locations.gateway");
 let AuthService = class AuthService {
     prisma;
     jwtService;
     usersService;
     mailService;
-    constructor(prisma, jwtService, usersService, mailService) {
+    locationsGateway;
+    constructor(prisma, jwtService, usersService, mailService, locationsGateway) {
         this.prisma = prisma;
         this.jwtService = jwtService;
         this.usersService = usersService;
         this.mailService = mailService;
+        this.locationsGateway = locationsGateway;
     }
     async sendVerificationCode(email) {
         const cleanedEmail = email.toLowerCase().trim();
-        const existingUser = await this.prisma.user.findUnique({
-            where: { email: cleanedEmail },
+        const prepared = await this.withRegistrationOtpLock(cleanedEmail, async (tx) => {
+            const existingUser = await tx.user.findUnique({
+                where: { email: cleanedEmail },
+                select: { id: true },
+            });
+            if (existingUser) {
+                throw new common_1.ConflictException('Bu e-posta adresi zaten kullanımda.');
+            }
+            const now = new Date();
+            const verification = await tx.emailVerification.findUnique({
+                where: { email: cleanedEmail },
+            });
+            if (verification?.blockedUntil && verification.blockedUntil > now) {
+                return {
+                    kind: 'blocked',
+                    blockedUntil: verification.blockedUntil,
+                };
+            }
+            if (verification && verification.expiresAt > now) {
+                return { kind: 'existing', expiresAt: verification.expiresAt };
+            }
+            const hourlyWindowActive = !!verification &&
+                now.getTime() - verification.hourlyWindowStart.getTime() <
+                    OTP_HOUR_MS;
+            const dailyWindowActive = !!verification &&
+                now.getTime() - verification.dailyWindowStart.getTime() < OTP_DAY_MS;
+            const hourlyWindowStart = hourlyWindowActive
+                ? verification.hourlyWindowStart
+                : now;
+            const dailyWindowStart = dailyWindowActive
+                ? verification.dailyWindowStart
+                : now;
+            const hourlySendCount = hourlyWindowActive
+                ? verification.hourlySendCount + 1
+                : 1;
+            const dailySendCount = dailyWindowActive
+                ? verification.dailySendCount + 1
+                : 1;
+            if (hourlySendCount > MAX_HOURLY_SENDS ||
+                dailySendCount > MAX_DAILY_SENDS) {
+                const blockedUntil = new Date(now.getTime() + OTP_BLOCK_MS);
+                if (verification) {
+                    await tx.emailVerification.update({
+                        where: { email: cleanedEmail },
+                        data: { blockedUntil },
+                    });
+                }
+                return { kind: 'blocked', blockedUntil };
+            }
+            const code = (0, crypto_1.randomInt)(100000, 1000000).toString();
+            const codeHash = await bcrypt.hash(code, 10);
+            const expiresAt = new Date(now.getTime() + OTP_TTL_MS);
+            await tx.emailVerification.upsert({
+                where: { email: cleanedEmail },
+                update: {
+                    code: codeHash,
+                    expiresAt,
+                    failedAttempts: 0,
+                    blockedUntil: null,
+                    lastSentAt: now,
+                    hourlyWindowStart,
+                    hourlySendCount,
+                    dailyWindowStart,
+                    dailySendCount,
+                },
+                create: {
+                    email: cleanedEmail,
+                    code: codeHash,
+                    expiresAt,
+                    lastSentAt: now,
+                    hourlyWindowStart: now,
+                    hourlySendCount: 1,
+                    dailyWindowStart: now,
+                    dailySendCount: 1,
+                },
+            });
+            return { kind: 'send', code, codeHash, expiresAt };
         });
-        if (existingUser) {
-            throw new common_1.ConflictException('Bu e-posta adresi zaten kullanımda.');
+        if (prepared.kind === 'blocked') {
+            throw this.tooManyRequests(prepared.blockedUntil);
         }
-        const now = new Date();
-        const verification = await this.prisma.emailVerification.findUnique({
-            where: { email: cleanedEmail },
-        });
-        if (verification?.blockedUntil && verification.blockedUntil > now) {
-            throw this.tooManyRequests(verification.blockedUntil);
-        }
-        if (verification && verification.expiresAt > now) {
+        if (prepared.kind === 'existing') {
             return {
                 success: true,
                 codeSent: false,
                 message: 'Mevcut doğrulama kodunuz hâlâ geçerli.',
-                expiresAt: verification.expiresAt,
-                remainingSeconds: this.remainingSeconds(verification.expiresAt),
+                expiresAt: prepared.expiresAt,
+                remainingSeconds: this.remainingSeconds(prepared.expiresAt),
             };
         }
-        const hourlyWindowStart = verification?.hourlyWindowStart &&
-            now.getTime() - verification.hourlyWindowStart.getTime() < OTP_HOUR_MS
-            ? verification.hourlyWindowStart
-            : now;
-        const dailyWindowStart = verification?.dailyWindowStart &&
-            now.getTime() - verification.dailyWindowStart.getTime() < OTP_DAY_MS
-            ? verification.dailyWindowStart
-            : now;
-        const hourlySendCount = hourlyWindowStart === verification?.hourlyWindowStart
-            ? verification.hourlySendCount + 1
-            : 1;
-        const dailySendCount = dailyWindowStart === verification?.dailyWindowStart
-            ? verification.dailySendCount + 1
-            : 1;
-        if (hourlySendCount > MAX_HOURLY_SENDS ||
-            dailySendCount > MAX_DAILY_SENDS) {
-            const blockedUntil = new Date(now.getTime() + OTP_BLOCK_MS);
-            if (verification) {
-                await this.prisma.emailVerification.update({
-                    where: { email: cleanedEmail },
-                    data: { blockedUntil },
-                });
-            }
-            throw this.tooManyRequests(blockedUntil);
+        try {
+            await this.mailService.sendVerificationCodeEmail(cleanedEmail, prepared.code);
         }
-        const code = (0, crypto_1.randomInt)(100000, 1000000).toString();
-        const codeHash = await bcrypt.hash(code, 10);
-        const expiresAt = new Date(now.getTime() + OTP_TTL_MS);
-        await this.prisma.emailVerification.upsert({
-            where: { email: cleanedEmail },
-            update: {
-                code: codeHash,
-                expiresAt,
-                failedAttempts: 0,
-                blockedUntil: null,
-                lastSentAt: now,
-                hourlyWindowStart,
-                hourlySendCount,
-                dailyWindowStart,
-                dailySendCount,
-            },
-            create: {
-                email: cleanedEmail,
-                code: codeHash,
-                expiresAt,
-                lastSentAt: now,
-                hourlyWindowStart: now,
-                hourlySendCount: 1,
-                dailyWindowStart: now,
-                dailySendCount: 1,
-            },
-        });
-        await this.mailService.sendVerificationCodeEmail(cleanedEmail, code);
+        catch (error) {
+            await this.prisma.emailVerification.updateMany({
+                where: { email: cleanedEmail, code: prepared.codeHash },
+                data: { expiresAt: new Date() },
+            });
+            throw error;
+        }
         return {
             success: true,
             codeSent: true,
             message: 'Doğrulama kodu e-posta adresinize gönderildi.',
-            expiresAt,
-            remainingSeconds: this.remainingSeconds(expiresAt),
+            expiresAt: prepared.expiresAt,
+            remainingSeconds: this.remainingSeconds(prepared.expiresAt),
         };
     }
     async register(dto) {
         const cleanedEmail = dto.email.toLowerCase().trim();
-        const existingUser = await this.prisma.user.findUnique({
-            where: { email: cleanedEmail },
+        const result = await this.withRegistrationOtpLock(cleanedEmail, async (tx) => {
+            const existingUser = await tx.user.findUnique({
+                where: { email: cleanedEmail },
+                select: { id: true },
+            });
+            if (existingUser) {
+                throw new common_1.ConflictException('Bu e-posta adresi zaten kullanımda.');
+            }
+            const verification = await tx.emailVerification.findUnique({
+                where: { email: cleanedEmail },
+            });
+            const now = new Date();
+            if (verification?.blockedUntil && verification.blockedUntil > now) {
+                return {
+                    kind: 'blocked',
+                    blockedUntil: verification.blockedUntil,
+                };
+            }
+            if (!verification || verification.expiresAt < now) {
+                return { kind: 'expired' };
+            }
+            const codeIsValid = await bcrypt.compare(dto.code, verification.code);
+            if (!codeIsValid) {
+                const failedAttempts = verification.failedAttempts + 1;
+                const blockedUntil = failedAttempts >= MAX_FAILED_ATTEMPTS
+                    ? new Date(now.getTime() + OTP_BLOCK_MS)
+                    : null;
+                await tx.emailVerification.update({
+                    where: { email: cleanedEmail },
+                    data: { failedAttempts, blockedUntil },
+                });
+                if (blockedUntil)
+                    return { kind: 'blocked', blockedUntil };
+                return {
+                    kind: 'invalid-code',
+                    remainingAttempts: MAX_FAILED_ATTEMPTS - failedAttempts,
+                };
+            }
+            const passwordHash = await bcrypt.hash(dto.password, 10);
+            const userRole = dto.role || 'guardian';
+            const trialEndsAt = new Date();
+            if (userRole === 'guardian') {
+                trialEndsAt.setDate(trialEndsAt.getDate() + 3);
+            }
+            const user = await tx.user.create({
+                data: {
+                    email: cleanedEmail,
+                    passwordHash,
+                    name: dto.name,
+                    phone: dto.phone,
+                    role: userRole,
+                    trialEndsAt,
+                    gender: dto.gender,
+                },
+                select: { id: true, email: true },
+            });
+            await tx.emailVerification.delete({
+                where: { email: cleanedEmail },
+            });
+            return { kind: 'registered', userId: user.id, email: user.email };
         });
-        if (existingUser) {
-            throw new common_1.ConflictException('Bu e-posta adresi zaten kullanımda.');
+        if (result.kind === 'blocked') {
+            throw this.tooManyRequests(result.blockedUntil);
         }
-        const verification = await this.prisma.emailVerification.findUnique({
-            where: { email: cleanedEmail },
-        });
-        const now = new Date();
-        if (verification?.blockedUntil && verification.blockedUntil > now) {
-            throw this.tooManyRequests(verification.blockedUntil);
-        }
-        if (!verification || verification.expiresAt < now) {
+        if (result.kind === 'expired') {
             throw new common_1.BadRequestException('Doğrulama kodunun süresi dolmuş. Lütfen yeni bir kod isteyin.');
         }
-        const codeIsValid = await bcrypt.compare(dto.code, verification.code);
-        if (!codeIsValid) {
-            const failedAttempts = verification.failedAttempts + 1;
-            const blockedUntil = failedAttempts >= MAX_FAILED_ATTEMPTS
-                ? new Date(now.getTime() + OTP_BLOCK_MS)
-                : null;
-            await this.prisma.emailVerification.update({
-                where: { email: cleanedEmail },
-                data: { failedAttempts, blockedUntil },
-            });
-            if (blockedUntil) {
-                throw this.tooManyRequests(blockedUntil);
-            }
+        if (result.kind === 'invalid-code') {
             throw new common_1.BadRequestException({
                 message: 'Girdiğiniz doğrulama kodu hatalıdır.',
-                remainingAttempts: MAX_FAILED_ATTEMPTS - failedAttempts,
+                remainingAttempts: result.remainingAttempts,
             });
         }
-        const passwordHash = await bcrypt.hash(dto.password, 10);
-        const userRole = dto.role || 'guardian';
-        const trialEndsAt = new Date();
-        if (userRole === 'guardian') {
-            trialEndsAt.setDate(trialEndsAt.getDate() + 3);
-        }
-        const user = await this.prisma.user.create({
-            data: {
-                email: cleanedEmail,
-                passwordHash,
-                name: dto.name,
-                phone: dto.phone,
-                role: userRole,
-                trialEndsAt,
-                gender: dto.gender,
-            },
-        });
-        await this.prisma.emailVerification
-            .delete({
-            where: { email: cleanedEmail },
-        })
-            .catch(() => { });
-        const tokens = await this.createSession(user.id, user.email, dto.deviceId);
-        const userProfile = await this.usersService.findOne(user.id);
+        const tokens = await this.createSession(result.userId, result.email, dto.deviceId);
+        const userProfile = await this.usersService.findOne(result.userId);
         return {
             message: 'Kayıt işlemi başarıyla tamamlandı.',
             ...tokens,
@@ -229,22 +277,27 @@ let AuthService = class AuthService {
         if (requiredRole && user.role !== requiredRole) {
             throw new common_1.ForbiddenException('Bu hesap yönetim paneline erişemez.');
         }
+        let tokens;
         if (user.role === 'child' || user.role === 'elder') {
             if (!dto.deviceId) {
                 throw new common_1.BadRequestException('Bu hesap için cihaz kimliği doğrulaması gereklidir.');
             }
-            if (!user.deviceId) {
-                await this.prisma.user.update({
+            tokens = await this.withUserSessionSecurityLock(user.id, async (tx) => {
+                const currentDeviceState = await tx.user.findUnique({
                     where: { id: user.id },
-                    data: {
-                        deviceId: dto.deviceId,
-                        loginAllowed: false,
+                    select: {
+                        deviceId: true,
+                        deviceLoginBlocked: true,
                     },
                 });
-            }
-            else if (user.deviceId !== dto.deviceId) {
-                if (user.loginAllowed) {
-                    await this.prisma.user.update({
+                if (!currentDeviceState) {
+                    throw new common_1.UnauthorizedException('Kullanıcı bulunamadı.');
+                }
+                if (currentDeviceState.deviceLoginBlocked) {
+                    throw new common_1.UnauthorizedException('Bu hesap veli onayıyla kapatılmıştır. Yeniden giriş için aile sahibinin cihazı sıfırlaması gerekir.');
+                }
+                if (!currentDeviceState.deviceId) {
+                    await tx.user.update({
                         where: { id: user.id },
                         data: {
                             deviceId: dto.deviceId,
@@ -252,12 +305,15 @@ let AuthService = class AuthService {
                         },
                     });
                 }
-                else {
+                else if (currentDeviceState.deviceId !== dto.deviceId) {
                     throw new common_1.UnauthorizedException('Bu hesap başka bir cihaza kilitlenmiştir. Yeni cihazdan giriş yapmak için velinizin onay vermesi gerekmektedir.');
                 }
-            }
+                return this.createSessionInTransaction(tx, user.id, user.email, dto.deviceId);
+            });
         }
-        const tokens = await this.createSession(user.id, user.email, dto.deviceId);
+        else {
+            tokens = await this.createSession(user.id, user.email, dto.deviceId);
+        }
         const userProfile = await this.usersService.findOne(user.id);
         return {
             message: 'Giriş başarılı.',
@@ -272,26 +328,27 @@ let AuthService = class AuthService {
         return this.jwtService.sign({ sub: userId, email, sid: sessionId, typ: 'access' }, { expiresIn: ACCESS_TOKEN_TTL });
     }
     async createSession(userId, email, deviceId) {
+        return this.prisma.$transaction((tx) => this.createSessionInTransaction(tx, userId, email, deviceId));
+    }
+    async createSessionInTransaction(tx, userId, email, deviceId) {
         const refreshToken = (0, crypto_1.randomBytes)(48).toString('base64url');
         const refreshTokenHash = this.hashRefreshToken(refreshToken);
         const refreshTokenExpiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS);
         const tokenFamilyId = (0, crypto_1.randomUUID)();
-        const session = await this.prisma.$transaction(async (tx) => {
-            if (deviceId) {
-                await tx.session.updateMany({
-                    where: { userId, deviceId, revokedAt: null },
-                    data: { revokedAt: new Date() },
-                });
-            }
-            return tx.session.create({
-                data: {
-                    userId,
-                    tokenFamilyId,
-                    refreshTokenHash,
-                    deviceId,
-                    expiresAt: refreshTokenExpiresAt,
-                },
+        if (deviceId) {
+            await tx.session.updateMany({
+                where: { userId, deviceId, revokedAt: null },
+                data: { revokedAt: new Date() },
             });
+        }
+        const session = await tx.session.create({
+            data: {
+                userId,
+                tokenFamilyId,
+                refreshTokenHash,
+                deviceId,
+                expiresAt: refreshTokenExpiresAt,
+            },
         });
         const accessToken = this.generateAccessToken(userId, email, session.id);
         return {
@@ -304,100 +361,414 @@ let AuthService = class AuthService {
     }
     async refresh(refreshToken) {
         const tokenHash = this.hashRefreshToken(refreshToken);
-        const session = await this.prisma.session.findUnique({
+        const candidate = await this.prisma.session.findUnique({
             where: { refreshTokenHash: tokenHash },
-            include: { user: { select: { id: true, email: true } } },
+            select: { id: true, userId: true },
         });
-        if (!session) {
+        if (!candidate) {
             throw new common_1.UnauthorizedException('Geçersiz refresh token.');
         }
-        const now = new Date();
-        if (session.revokedAt) {
-            await this.handleRefreshTokenReuse(session, now);
-        }
-        if (session.expiresAt <= now) {
-            await this.prisma.session.updateMany({
-                where: { id: session.id, revokedAt: null },
-                data: { revokedAt: now },
+        const result = await this.withUserSessionSecurityLock(candidate.userId, async (tx) => {
+            const session = await tx.session.findUnique({
+                where: { id: candidate.id },
+                include: { user: { select: { id: true, email: true } } },
             });
+            if (!session || session.refreshTokenHash !== tokenHash) {
+                return { kind: 'invalid' };
+            }
+            const now = new Date();
+            if (session.revokedAt) {
+                return this.handleRefreshTokenReuse(tx, session, now);
+            }
+            if (session.expiresAt <= now) {
+                await tx.session.updateMany({
+                    where: { id: session.id, revokedAt: null },
+                    data: { revokedAt: now },
+                });
+                return { kind: 'expired' };
+            }
+            const nextRefreshToken = (0, crypto_1.randomBytes)(48).toString('base64url');
+            const nextTokenHash = this.hashRefreshToken(nextRefreshToken);
+            const refreshTokenExpiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS);
+            const claimed = await tx.session.updateMany({
+                where: { id: session.id, revokedAt: null },
+                data: {
+                    revokedAt: now,
+                    lastUsedAt: now,
+                    replacedByTokenHash: nextTokenHash,
+                },
+            });
+            if (claimed.count !== 1) {
+                return { kind: 'revoked' };
+            }
+            const nextSession = await tx.session.create({
+                data: {
+                    userId: session.userId,
+                    tokenFamilyId: session.tokenFamilyId,
+                    refreshTokenHash: nextTokenHash,
+                    deviceId: session.deviceId,
+                    expiresAt: refreshTokenExpiresAt,
+                },
+                select: { id: true },
+            });
+            return {
+                kind: 'rotated',
+                sessionId: nextSession.id,
+                userId: session.user.id,
+                email: session.user.email,
+                refreshToken: nextRefreshToken,
+                refreshTokenExpiresAt,
+            };
+        });
+        if (result.kind === 'invalid') {
+            throw new common_1.UnauthorizedException('Geçersiz refresh token.');
+        }
+        if (result.kind === 'expired') {
             throw new common_1.UnauthorizedException('Oturumun süresi dolmuş. Lütfen tekrar giriş yapın.');
         }
-        const nextRefreshToken = (0, crypto_1.randomBytes)(48).toString('base64url');
-        const nextTokenHash = this.hashRefreshToken(nextRefreshToken);
-        const refreshTokenExpiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS);
-        let nextSession;
-        try {
-            nextSession = await this.prisma.$transaction(async (tx) => {
-                const claimed = await tx.session.updateMany({
-                    where: { id: session.id, revokedAt: null },
-                    data: {
-                        revokedAt: now,
-                        lastUsedAt: now,
-                        replacedByTokenHash: nextTokenHash,
-                    },
-                });
-                if (claimed.count !== 1) {
-                    throw new common_1.UnauthorizedException('Refresh token tekrar kullanıldı.');
-                }
-                return tx.session.create({
-                    data: {
-                        userId: session.userId,
-                        tokenFamilyId: session.tokenFamilyId,
-                        refreshTokenHash: nextTokenHash,
-                        deviceId: session.deviceId,
-                        expiresAt: refreshTokenExpiresAt,
-                    },
-                    select: { id: true },
-                });
+        if (result.kind === 'grace') {
+            throw new common_1.ConflictException({
+                statusCode: common_1.HttpStatus.CONFLICT,
+                code: 'REFRESH_ALREADY_ROTATED',
+                message: 'Refresh token kısa süre önce yenilendi. Güncel tokenı güvenli depodan tekrar okuyun.',
+                retryAfterMs: result.retryAfterMs,
             });
         }
-        catch (error) {
-            const latestState = await this.prisma.session.findUnique({
-                where: { id: session.id },
-            });
-            if (latestState?.revokedAt) {
-                await this.handleRefreshTokenReuse(latestState, new Date());
-            }
-            throw error;
+        if (result.kind === 'revoked') {
+            throw new common_1.UnauthorizedException('Bu refresh token daha önce kullanılmış veya iptal edilmiş.');
         }
-        const accessToken = this.generateAccessToken(session.user.id, session.user.email, nextSession.id);
+        const accessToken = this.generateAccessToken(result.userId, result.email, result.sessionId);
         return {
             token: accessToken,
             accessToken,
-            refreshToken: nextRefreshToken,
+            refreshToken: result.refreshToken,
             accessTokenExpiresIn: ACCESS_TOKEN_TTL_SECONDS,
-            refreshTokenExpiresAt,
+            refreshTokenExpiresAt: result.refreshTokenExpiresAt,
         };
     }
     async logout(sessionId) {
-        await this.prisma.session.updateMany({
-            where: { id: sessionId, revokedAt: null },
-            data: { revokedAt: new Date() },
+        const candidate = await this.prisma.session.findUnique({
+            where: { id: sessionId },
+            select: { userId: true, user: { select: { role: true } } },
         });
+        if (candidate?.user.role === 'child' || candidate?.user.role === 'elder') {
+            throw new common_1.ForbiddenException('Çocuk ve aile büyüğü hesaplarında çıkış için aile sahibi onayı gerekir.');
+        }
+        if (candidate) {
+            const revokedSessionIds = await this.withUserSessionSecurityLock(candidate.userId, async (tx) => {
+                const session = await tx.session.findUnique({
+                    where: { id: sessionId },
+                    select: {
+                        userId: true,
+                        tokenFamilyId: true,
+                        user: { select: { role: true } },
+                    },
+                });
+                if (!session || session.userId !== candidate.userId)
+                    return [];
+                if (session.user.role === 'child' || session.user.role === 'elder') {
+                    throw new common_1.ForbiddenException('Çocuk ve aile büyüğü hesaplarında çıkış için aile sahibi onayı gerekir.');
+                }
+                const sessionsToRevoke = await tx.session.findMany({
+                    where: {
+                        userId: session.userId,
+                        tokenFamilyId: session.tokenFamilyId,
+                        revokedAt: null,
+                    },
+                    select: { id: true },
+                });
+                await tx.session.updateMany({
+                    where: {
+                        userId: session.userId,
+                        tokenFamilyId: session.tokenFamilyId,
+                        revokedAt: null,
+                    },
+                    data: { revokedAt: new Date() },
+                });
+                return sessionsToRevoke.map((item) => item.id);
+            });
+            this.locationsGateway.disconnectSessions(candidate.userId, revokedSessionIds);
+        }
         return { message: 'Oturum kapatıldı.' };
+    }
+    async requestChildElderLogoutApproval(userId, sessionId) {
+        const now = new Date();
+        const prepared = await this.withUserSessionSecurityLock(userId, async (tx) => {
+            const session = await tx.session.findFirst({
+                where: {
+                    id: sessionId,
+                    userId,
+                    revokedAt: null,
+                    expiresAt: { gt: now },
+                },
+                select: { tokenFamilyId: true, deviceId: true },
+            });
+            if (!session) {
+                throw new common_1.UnauthorizedException('Aktif oturum bulunamadı.');
+            }
+            const subject = await this.loadCanonicalLogoutSubject(tx, userId);
+            const membership = subject.memberships[0];
+            const existing = await tx.childElderLogoutApproval.findUnique({
+                where: { userId },
+            });
+            if (existing?.blockedUntil && existing.blockedUntil > now) {
+                return { kind: 'blocked', blockedUntil: existing.blockedUntil };
+            }
+            const contextMatches = existing?.familyId === membership.familyId &&
+                existing.ownerId === membership.family.ownerId &&
+                existing.tokenFamilyId === session.tokenFamilyId &&
+                existing.deviceId === session.deviceId;
+            if (existing && existing.expiresAt > now && contextMatches) {
+                return { kind: 'existing', expiresAt: existing.expiresAt };
+            }
+            const hourlyWindowActive = !!existing &&
+                now.getTime() - existing.hourlyWindowStart.getTime() < OTP_HOUR_MS;
+            const dailyWindowActive = !!existing &&
+                now.getTime() - existing.dailyWindowStart.getTime() < OTP_DAY_MS;
+            const hourlyWindowStart = hourlyWindowActive
+                ? existing.hourlyWindowStart
+                : now;
+            const dailyWindowStart = dailyWindowActive
+                ? existing.dailyWindowStart
+                : now;
+            const hourlySendCount = hourlyWindowActive
+                ? existing.hourlySendCount + 1
+                : 1;
+            const dailySendCount = dailyWindowActive
+                ? existing.dailySendCount + 1
+                : 1;
+            if (hourlySendCount > MAX_HOURLY_SENDS ||
+                dailySendCount > MAX_DAILY_SENDS) {
+                const blockedUntil = new Date(now.getTime() + OTP_BLOCK_MS);
+                if (existing) {
+                    await tx.childElderLogoutApproval.update({
+                        where: { userId },
+                        data: { blockedUntil },
+                    });
+                }
+                return { kind: 'blocked', blockedUntil };
+            }
+            const code = (0, crypto_1.randomInt)(100000, 1000000).toString();
+            const codeHash = await bcrypt.hash(code, 10);
+            const expiresAt = new Date(now.getTime() + OTP_TTL_MS);
+            const approval = await tx.childElderLogoutApproval.upsert({
+                where: { userId },
+                update: {
+                    familyId: membership.familyId,
+                    ownerId: membership.family.ownerId,
+                    tokenFamilyId: session.tokenFamilyId,
+                    deviceId: session.deviceId,
+                    codeHash,
+                    expiresAt,
+                    failedAttempts: 0,
+                    blockedUntil: null,
+                    lastSentAt: now,
+                    hourlyWindowStart,
+                    hourlySendCount,
+                    dailyWindowStart,
+                    dailySendCount,
+                },
+                create: {
+                    userId,
+                    familyId: membership.familyId,
+                    ownerId: membership.family.ownerId,
+                    tokenFamilyId: session.tokenFamilyId,
+                    deviceId: session.deviceId,
+                    codeHash,
+                    expiresAt,
+                    lastSentAt: now,
+                    hourlyWindowStart,
+                    hourlySendCount,
+                    dailyWindowStart,
+                    dailySendCount,
+                },
+                select: { id: true },
+            });
+            return {
+                kind: 'send',
+                approvalId: approval.id,
+                codeHash,
+                code,
+                ownerEmail: membership.family.owner.email,
+                memberName: subject.name,
+                expiresAt,
+            };
+        });
+        if (prepared.kind === 'blocked') {
+            throw this.tooManyRequests(prepared.blockedUntil);
+        }
+        if (prepared.kind === 'existing') {
+            return {
+                success: true,
+                codeSent: false,
+                message: 'Mevcut çıkış doğrulama kodu hâlâ geçerli. Kod aile sahibinin e-posta adresine gönderildi.',
+                expiresAt: prepared.expiresAt,
+                remainingSeconds: this.remainingSeconds(prepared.expiresAt),
+            };
+        }
+        try {
+            await this.mailService.sendChildElderLogoutCodeEmail(prepared.ownerEmail, prepared.memberName, prepared.code);
+        }
+        catch {
+            await this.prisma.childElderLogoutApproval.updateMany({
+                where: {
+                    id: prepared.approvalId,
+                    codeHash: prepared.codeHash,
+                },
+                data: { expiresAt: new Date() },
+            });
+            throw new common_1.ServiceUnavailableException('Doğrulama kodu gönderilemedi. Oturumunuz açık tutuldu; lütfen tekrar deneyin.');
+        }
+        return {
+            success: true,
+            codeSent: true,
+            message: 'Doğrulama kodu aile sahibinin e-posta adresine gönderildi.',
+            expiresAt: prepared.expiresAt,
+            remainingSeconds: this.remainingSeconds(prepared.expiresAt),
+        };
+    }
+    async confirmChildElderLogout(userId, sessionId, code) {
+        const result = await this.withUserSessionSecurityLock(userId, async (tx) => {
+            const now = new Date();
+            const session = await tx.session.findUnique({
+                where: { id: sessionId },
+                select: { userId: true, tokenFamilyId: true, deviceId: true },
+            });
+            if (!session || session.userId !== userId) {
+                return { kind: 'invalid-context' };
+            }
+            const subject = await this.loadCanonicalLogoutSubject(tx, userId);
+            const membership = subject.memberships[0];
+            const approval = await tx.childElderLogoutApproval.findUnique({
+                where: { userId },
+            });
+            if (!approval)
+                return { kind: 'expired' };
+            const contextMatches = approval.familyId === membership.familyId &&
+                approval.ownerId === membership.family.ownerId &&
+                approval.tokenFamilyId === session.tokenFamilyId &&
+                approval.deviceId === session.deviceId;
+            if (!contextMatches) {
+                await tx.childElderLogoutApproval.delete({ where: { userId } });
+                return { kind: 'invalid-context' };
+            }
+            if (approval.blockedUntil && approval.blockedUntil > now) {
+                return { kind: 'blocked', blockedUntil: approval.blockedUntil };
+            }
+            if (approval.expiresAt <= now) {
+                await tx.childElderLogoutApproval.delete({ where: { userId } });
+                return { kind: 'expired' };
+            }
+            const codeIsValid = await bcrypt.compare(code, approval.codeHash);
+            if (!codeIsValid) {
+                const failedAttempts = approval.failedAttempts + 1;
+                const blockedUntil = failedAttempts >= MAX_FAILED_ATTEMPTS
+                    ? new Date(now.getTime() + OTP_BLOCK_MS)
+                    : null;
+                await tx.childElderLogoutApproval.update({
+                    where: { userId },
+                    data: { failedAttempts, blockedUntil },
+                });
+                if (blockedUntil)
+                    return { kind: 'blocked', blockedUntil };
+                return {
+                    kind: 'invalid-code',
+                    remainingAttempts: MAX_FAILED_ATTEMPTS - failedAttempts,
+                };
+            }
+            await tx.childElderLogoutApproval.delete({ where: { userId } });
+            await tx.user.update({
+                where: { id: userId },
+                data: { deviceLoginBlocked: true },
+            });
+            await tx.session.updateMany({
+                where: { userId, revokedAt: null },
+                data: { revokedAt: now },
+            });
+            return { kind: 'approved' };
+        });
+        if (result.kind === 'blocked') {
+            throw this.tooManyRequests(result.blockedUntil);
+        }
+        if (result.kind === 'invalid-code') {
+            throw new common_1.BadRequestException({
+                message: 'Geçersiz çıkış doğrulama kodu.',
+                remainingAttempts: result.remainingAttempts,
+            });
+        }
+        if (result.kind === 'expired') {
+            throw new common_1.BadRequestException('Çıkış doğrulama kodunun süresi dolmuş veya kod daha önce kullanılmış.');
+        }
+        if (result.kind === 'invalid-context') {
+            throw new common_1.ForbiddenException('Çıkış doğrulama isteği bu kullanıcı, aile veya cihaz oturumuyla eşleşmiyor.');
+        }
+        this.locationsGateway.disconnectUser(userId);
+        return { message: 'Oturum aile sahibi onayıyla kapatıldı.' };
     }
     async logoutAll(userId) {
         await this.revokeAllSessions(userId);
+        this.locationsGateway.disconnectUser(userId);
         return { message: 'Tüm cihazlardaki oturumlar kapatıldı.' };
     }
     async revokeAllSessions(userId) {
-        await this.prisma.session.updateMany({
-            where: { userId, revokedAt: null },
-            data: { revokedAt: new Date() },
+        await this.withUserSessionSecurityLock(userId, async (tx) => {
+            const user = await tx.user.findUnique({
+                where: { id: userId },
+                select: { role: true },
+            });
+            if (!user)
+                throw new common_1.UnauthorizedException('Kullanıcı bulunamadı.');
+            if (user.role === 'child' || user.role === 'elder') {
+                throw new common_1.ForbiddenException('Çocuk ve aile büyüğü hesaplarında çıkış için aile sahibi onayı gerekir.');
+            }
+            await tx.session.updateMany({
+                where: { userId, revokedAt: null },
+                data: { revokedAt: new Date() },
+            });
         });
     }
-    async handleRefreshTokenReuse(session, now) {
+    async loadCanonicalLogoutSubject(tx, userId) {
+        const subject = await tx.user.findUnique({
+            where: { id: userId },
+            select: {
+                id: true,
+                name: true,
+                role: true,
+                memberships: {
+                    where: { memberType: { in: ['child', 'elder'] } },
+                    take: 2,
+                    select: {
+                        familyId: true,
+                        memberType: true,
+                        family: {
+                            select: {
+                                ownerId: true,
+                                owner: { select: { email: true } },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+        if (!subject || (subject.role !== 'child' && subject.role !== 'elder')) {
+            throw new common_1.ForbiddenException('Bu onay akışı yalnız çocuk ve aile büyüğü hesapları içindir.');
+        }
+        if (subject.memberships.length !== 1 ||
+            subject.memberships[0].memberType !== subject.role) {
+            throw new common_1.ConflictException('Çıkış onayı için tek ve doğrulanabilir bir aile sahibi belirlenemedi.');
+        }
+        return subject;
+    }
+    async handleRefreshTokenReuse(tx, session, now) {
         if (session.replacedByTokenHash && session.revokedAt) {
             const elapsedMs = now.getTime() - session.revokedAt.getTime();
             if (elapsedMs >= 0 && elapsedMs <= REFRESH_REUSE_GRACE_MS) {
-                throw new common_1.ConflictException({
-                    statusCode: common_1.HttpStatus.CONFLICT,
-                    code: 'REFRESH_ALREADY_ROTATED',
-                    message: 'Refresh token kısa süre önce yenilendi. Güncel tokenı güvenli depodan tekrar okuyun.',
+                return {
+                    kind: 'grace',
                     retryAfterMs: Math.max(0, REFRESH_REUSE_GRACE_MS - elapsedMs),
-                });
+                };
             }
-            await this.prisma.session.updateMany({
+            await tx.session.updateMany({
                 where: {
                     userId: session.userId,
                     tokenFamilyId: session.tokenFamilyId,
@@ -406,118 +777,195 @@ let AuthService = class AuthService {
                 data: { revokedAt: now },
             });
         }
-        throw new common_1.UnauthorizedException('Bu refresh token daha önce kullanılmış veya iptal edilmiş.');
+        return { kind: 'revoked' };
+    }
+    async withUserSessionSecurityLock(userId, operation) {
+        return this.prisma.$transaction(async (tx) => {
+            await tx.$executeRaw `SELECT pg_advisory_xact_lock(hashtextextended(${`session-security:${userId}`}, 0))`;
+            return operation(tx);
+        });
+    }
+    async withRegistrationOtpLock(normalizedEmail, operation) {
+        return this.prisma.$transaction(async (tx) => {
+            await tx.$executeRaw `SELECT pg_advisory_xact_lock(hashtextextended(${`otp-registration:${normalizedEmail}`}, 0))`;
+            return operation(tx);
+        });
     }
     hashRefreshToken(token) {
         return (0, crypto_1.createHash)('sha256').update(token).digest('hex');
     }
     async forgotPassword(email) {
         const cleanedEmail = email.toLowerCase().trim();
-        const user = await this.prisma.user.findUnique({
+        const candidate = await this.prisma.user.findUnique({
             where: { email: cleanedEmail },
+            select: { id: true },
         });
-        if (!user) {
+        if (!candidate) {
             return { message: 'E-posta kayıtlıysa şifre sıfırlama kodu gönderildi.' };
         }
-        const now = new Date();
-        if (user.resetOtpBlockedUntil && user.resetOtpBlockedUntil > now) {
-            throw this.tooManyRequests(user.resetOtpBlockedUntil);
+        const prepared = await this.withUserSessionSecurityLock(candidate.id, async (tx) => {
+            const user = await tx.user.findUnique({
+                where: { id: candidate.id },
+                select: {
+                    id: true,
+                    email: true,
+                    resetOtpBlockedUntil: true,
+                    resetOtpExpiresAt: true,
+                    resetOtpHourlyWindowStart: true,
+                    resetOtpHourlySendCount: true,
+                    resetOtpDailyWindowStart: true,
+                    resetOtpDailySendCount: true,
+                },
+            });
+            if (!user)
+                return { kind: 'missing' };
+            const now = new Date();
+            if (user.resetOtpBlockedUntil && user.resetOtpBlockedUntil > now) {
+                return {
+                    kind: 'blocked',
+                    blockedUntil: user.resetOtpBlockedUntil,
+                };
+            }
+            if (user.resetOtpExpiresAt && user.resetOtpExpiresAt > now) {
+                return { kind: 'existing', expiresAt: user.resetOtpExpiresAt };
+            }
+            const hourlyWindowActive = !!user.resetOtpHourlyWindowStart &&
+                now.getTime() - user.resetOtpHourlyWindowStart.getTime() <
+                    OTP_HOUR_MS;
+            const dailyWindowActive = !!user.resetOtpDailyWindowStart &&
+                now.getTime() - user.resetOtpDailyWindowStart.getTime() < OTP_DAY_MS;
+            const hourlyWindowStart = hourlyWindowActive
+                ? user.resetOtpHourlyWindowStart
+                : now;
+            const dailyWindowStart = dailyWindowActive
+                ? user.resetOtpDailyWindowStart
+                : now;
+            const hourlySendCount = hourlyWindowActive
+                ? user.resetOtpHourlySendCount + 1
+                : 1;
+            const dailySendCount = dailyWindowActive
+                ? user.resetOtpDailySendCount + 1
+                : 1;
+            if (hourlySendCount > MAX_HOURLY_SENDS ||
+                dailySendCount > MAX_DAILY_SENDS) {
+                const blockedUntil = new Date(now.getTime() + OTP_BLOCK_MS);
+                await tx.user.update({
+                    where: { id: user.id },
+                    data: { resetOtpBlockedUntil: blockedUntil },
+                });
+                return { kind: 'blocked', blockedUntil };
+            }
+            const code = (0, crypto_1.randomInt)(100000, 1000000).toString();
+            const codeHash = await bcrypt.hash(code, 10);
+            const expiresAt = new Date(now.getTime() + OTP_TTL_MS);
+            await tx.user.update({
+                where: { id: user.id },
+                data: {
+                    resetOtpCode: codeHash,
+                    resetOtpExpiresAt: expiresAt,
+                    resetOtpFailedAttempts: 0,
+                    resetOtpBlockedUntil: null,
+                    resetOtpLastSentAt: now,
+                    resetOtpHourlyWindowStart: hourlyWindowStart,
+                    resetOtpHourlySendCount: hourlySendCount,
+                    resetOtpDailyWindowStart: dailyWindowStart,
+                    resetOtpDailySendCount: dailySendCount,
+                },
+            });
+            return {
+                kind: 'send',
+                userId: user.id,
+                email: user.email,
+                code,
+                codeHash,
+                expiresAt,
+            };
+        });
+        if (prepared.kind === 'missing') {
+            return { message: 'E-posta kayıtlıysa şifre sıfırlama kodu gönderildi.' };
         }
-        if (user.resetOtpExpiresAt && user.resetOtpExpiresAt > now) {
+        if (prepared.kind === 'blocked') {
+            throw this.tooManyRequests(prepared.blockedUntil);
+        }
+        if (prepared.kind === 'existing') {
             return {
                 message: 'Mevcut şifre sıfırlama kodunuz hâlâ geçerli.',
                 codeSent: false,
-                expiresAt: user.resetOtpExpiresAt,
-                remainingSeconds: this.remainingSeconds(user.resetOtpExpiresAt),
+                expiresAt: prepared.expiresAt,
+                remainingSeconds: this.remainingSeconds(prepared.expiresAt),
             };
         }
-        const hourlyWindowStart = user.resetOtpHourlyWindowStart &&
-            now.getTime() - user.resetOtpHourlyWindowStart.getTime() < OTP_HOUR_MS
-            ? user.resetOtpHourlyWindowStart
-            : now;
-        const dailyWindowStart = user.resetOtpDailyWindowStart &&
-            now.getTime() - user.resetOtpDailyWindowStart.getTime() < OTP_DAY_MS
-            ? user.resetOtpDailyWindowStart
-            : now;
-        const hourlySendCount = hourlyWindowStart === user.resetOtpHourlyWindowStart
-            ? user.resetOtpHourlySendCount + 1
-            : 1;
-        const dailySendCount = dailyWindowStart === user.resetOtpDailyWindowStart
-            ? user.resetOtpDailySendCount + 1
-            : 1;
-        if (hourlySendCount > MAX_HOURLY_SENDS ||
-            dailySendCount > MAX_DAILY_SENDS) {
-            const blockedUntil = new Date(now.getTime() + OTP_BLOCK_MS);
-            await this.prisma.user.update({
-                where: { id: user.id },
-                data: { resetOtpBlockedUntil: blockedUntil },
-            });
-            throw this.tooManyRequests(blockedUntil);
+        try {
+            await this.mailService.sendResetPasswordEmail(prepared.email, prepared.code);
         }
-        const resetCode = (0, crypto_1.randomInt)(100000, 1000000).toString();
-        const codeHash = await bcrypt.hash(resetCode, 10);
-        const resetExpires = new Date(now.getTime() + OTP_TTL_MS);
-        await this.prisma.user.update({
-            where: { id: user.id },
-            data: {
-                resetOtpCode: codeHash,
-                resetOtpExpiresAt: resetExpires,
-                resetOtpFailedAttempts: 0,
-                resetOtpBlockedUntil: null,
-                resetOtpLastSentAt: now,
-                resetOtpHourlyWindowStart: hourlyWindowStart,
-                resetOtpHourlySendCount: hourlySendCount,
-                resetOtpDailyWindowStart: dailyWindowStart,
-                resetOtpDailySendCount: dailySendCount,
-            },
-        });
-        await this.mailService.sendResetPasswordEmail(user.email, resetCode);
+        catch (error) {
+            await this.prisma.user.updateMany({
+                where: { id: prepared.userId, resetOtpCode: prepared.codeHash },
+                data: { resetOtpExpiresAt: new Date() },
+            });
+            throw error;
+        }
         return {
             message: 'Şifre sıfırlama kodu e-posta adresinize gönderildi.',
             codeSent: true,
-            expiresAt: resetExpires,
-            remainingSeconds: this.remainingSeconds(resetExpires),
+            expiresAt: prepared.expiresAt,
+            remainingSeconds: this.remainingSeconds(prepared.expiresAt),
         };
     }
     async resetPassword(dto) {
-        const user = await this.prisma.user.findUnique({
+        const candidate = await this.prisma.user.findUnique({
             where: { email: dto.email.toLowerCase().trim() },
+            select: { id: true },
         });
-        if (!user) {
+        if (!candidate) {
             throw new common_1.BadRequestException('Geçersiz veya süresi dolmuş sıfırlama kodu.');
         }
-        const now = new Date();
-        if (user.resetOtpBlockedUntil && user.resetOtpBlockedUntil > now) {
-            throw this.tooManyRequests(user.resetOtpBlockedUntil);
-        }
-        if (!user.resetOtpCode ||
-            !user.resetOtpExpiresAt ||
-            user.resetOtpExpiresAt < now) {
-            throw new common_1.BadRequestException('Sıfırlama kodunun süresi dolmuş.');
-        }
-        const codeIsValid = await bcrypt.compare(dto.code, user.resetOtpCode);
-        if (!codeIsValid) {
-            const failedAttempts = user.resetOtpFailedAttempts + 1;
-            const blockedUntil = failedAttempts >= MAX_FAILED_ATTEMPTS
-                ? new Date(now.getTime() + OTP_BLOCK_MS)
-                : null;
-            await this.prisma.user.update({
-                where: { id: user.id },
-                data: {
-                    resetOtpFailedAttempts: failedAttempts,
-                    resetOtpBlockedUntil: blockedUntil,
+        const passwordHash = await bcrypt.hash(dto.newPassword, 10);
+        const result = await this.withUserSessionSecurityLock(candidate.id, async (tx) => {
+            const user = await tx.user.findUnique({
+                where: { id: candidate.id },
+                select: {
+                    id: true,
+                    resetOtpCode: true,
+                    resetOtpExpiresAt: true,
+                    resetOtpFailedAttempts: true,
+                    resetOtpBlockedUntil: true,
                 },
             });
-            if (blockedUntil) {
-                throw this.tooManyRequests(blockedUntil);
+            if (!user)
+                return { kind: 'invalid-user' };
+            const now = new Date();
+            if (user.resetOtpBlockedUntil && user.resetOtpBlockedUntil > now) {
+                return {
+                    kind: 'blocked',
+                    blockedUntil: user.resetOtpBlockedUntil,
+                };
             }
-            throw new common_1.BadRequestException({
-                message: 'Geçersiz sıfırlama kodu.',
-                remainingAttempts: MAX_FAILED_ATTEMPTS - failedAttempts,
-            });
-        }
-        const passwordHash = await bcrypt.hash(dto.newPassword, 10);
-        await this.prisma.$transaction(async (tx) => {
+            if (!user.resetOtpCode ||
+                !user.resetOtpExpiresAt ||
+                user.resetOtpExpiresAt < now) {
+                return { kind: 'expired' };
+            }
+            const codeIsValid = await bcrypt.compare(dto.code, user.resetOtpCode);
+            if (!codeIsValid) {
+                const failedAttempts = user.resetOtpFailedAttempts + 1;
+                const blockedUntil = failedAttempts >= MAX_FAILED_ATTEMPTS
+                    ? new Date(now.getTime() + OTP_BLOCK_MS)
+                    : null;
+                await tx.user.update({
+                    where: { id: user.id },
+                    data: {
+                        resetOtpFailedAttempts: failedAttempts,
+                        resetOtpBlockedUntil: blockedUntil,
+                    },
+                });
+                if (blockedUntil)
+                    return { kind: 'blocked', blockedUntil };
+                return {
+                    kind: 'invalid-code',
+                    remainingAttempts: MAX_FAILED_ATTEMPTS - failedAttempts,
+                };
+            }
             await tx.user.update({
                 where: { id: user.id },
                 data: {
@@ -532,7 +980,24 @@ let AuthService = class AuthService {
                 where: { userId: user.id, revokedAt: null },
                 data: { revokedAt: new Date() },
             });
+            return { kind: 'success' };
         });
+        if (result.kind === 'invalid-user') {
+            throw new common_1.BadRequestException('Geçersiz veya süresi dolmuş sıfırlama kodu.');
+        }
+        if (result.kind === 'expired') {
+            throw new common_1.BadRequestException('Sıfırlama kodunun süresi dolmuş.');
+        }
+        if (result.kind === 'blocked') {
+            throw this.tooManyRequests(result.blockedUntil);
+        }
+        if (result.kind === 'invalid-code') {
+            throw new common_1.BadRequestException({
+                message: 'Geçersiz sıfırlama kodu.',
+                remainingAttempts: result.remainingAttempts,
+            });
+        }
+        this.locationsGateway.disconnectUser(candidate.id);
         return {
             message: 'Şifreniz başarıyla sıfırlandı. Yeni şifrenizle giriş yapabilirsiniz.',
         };
@@ -552,10 +1017,12 @@ let AuthService = class AuthService {
 exports.AuthService = AuthService;
 exports.AuthService = AuthService = __decorate([
     (0, common_1.Injectable)(),
+    __param(4, (0, common_1.Inject)((0, common_1.forwardRef)(() => locations_gateway_1.LocationsGateway))),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
         jwt_1.JwtService,
         users_service_1.UsersService,
-        mail_service_1.MailService])
+        mail_service_1.MailService,
+        locations_gateway_1.LocationsGateway])
 ], AuthService);
 const OTP_TTL_MS = 3 * 60 * 1000;
 const OTP_BLOCK_MS = 15 * 60 * 1000;

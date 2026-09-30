@@ -17,7 +17,6 @@ const common_1 = require("@nestjs/common");
 const sos_service_1 = require("./sos.service");
 const trigger_sos_dto_1 = require("./dto/trigger-sos.dto");
 const jwt_auth_guard_1 = require("../auth/guards/jwt-auth.guard");
-const subscription_guard_1 = require("../auth/guards/subscription.guard");
 const get_user_decorator_1 = require("../auth/decorators/get-user.decorator");
 let SosController = class SosController {
     sosService;
@@ -38,7 +37,7 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], SosController.prototype, "triggerSos", null);
 exports.SosController = SosController = __decorate([
-    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard, subscription_guard_1.SubscriptionGuard),
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, common_1.Controller)('sos'),
     __metadata("design:paramtypes", [sos_service_1.SosService])
 ], SosController);

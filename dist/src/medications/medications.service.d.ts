@@ -2,12 +2,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateMedicationDto } from './dto/create-medication.dto';
 import { UpdateMedicationDto } from './dto/update-medication.dto';
 import { UsersService } from '../users/users.service';
-import { LocationsGateway } from '../locations/locations.gateway';
+import { NotificationsService } from '../notifications/notifications.service';
+import { SubscriptionEntitlementService } from '../common/subscription-entitlement.service';
 export declare class MedicationsService {
     private prisma;
     private usersService;
-    private locationsGateway;
-    constructor(prisma: PrismaService, usersService: UsersService, locationsGateway: LocationsGateway);
+    private notificationsService;
+    private subscriptionEntitlement;
+    constructor(prisma: PrismaService, usersService: UsersService, notificationsService: NotificationsService, subscriptionEntitlement: SubscriptionEntitlementService);
     createReminder(creatorId: string, dto: CreateMedicationDto): Promise<{
         id: string;
         createdAt: Date;
@@ -22,7 +24,7 @@ export declare class MedicationsService {
         startDate: Date;
         repeatDays: number | null;
     }>;
-    getReminders(userId: string): Promise<{
+    getReminders(requesterId: string, targetUserId: string): Promise<{
         id: string;
         createdAt: Date;
         updatedAt: Date;

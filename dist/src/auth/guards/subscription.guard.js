@@ -40,16 +40,23 @@ let SubscriptionGuard = class SubscriptionGuard {
         if (!dbUser) {
             return false;
         }
+        if (process.env.EARLY_ACCESS_ENABLED === 'true') {
+            return true;
+        }
         const now = new Date();
         const userTrialActive = dbUser.trialEndsAt > now;
-        const userPremiumActive = dbUser.isPremium && dbUser.premiumExpiresAt && dbUser.premiumExpiresAt > now;
+        const userPremiumActive = dbUser.isPremium &&
+            dbUser.premiumExpiresAt &&
+            dbUser.premiumExpiresAt > now;
         if (userTrialActive || userPremiumActive) {
             return true;
         }
         for (const membership of dbUser.memberships) {
             const owner = membership.family.owner;
             const ownerTrialActive = owner.trialEndsAt > now;
-            const ownerPremiumActive = owner.isPremium && owner.premiumExpiresAt && owner.premiumExpiresAt > now;
+            const ownerPremiumActive = owner.isPremium &&
+                owner.premiumExpiresAt &&
+                owner.premiumExpiresAt > now;
             if (ownerTrialActive || ownerPremiumActive) {
                 return true;
             }

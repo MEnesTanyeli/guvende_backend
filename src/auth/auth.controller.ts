@@ -12,7 +12,13 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { GetUser } from './decorators/get-user.decorator';
-import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  IsNotEmpty,
+  IsString,
+  Matches,
+  MinLength,
+} from 'class-validator';
 import { Throttle } from '@nestjs/throttler';
 import { RefreshTokenDto } from './dto/session.dto';
 import type { AuthenticatedUser } from './types/authenticated-user';
@@ -35,6 +41,12 @@ class ResetPasswordDto {
   @IsString()
   @MinLength(6, { message: 'Yeni şifreniz en az 6 karakter olmalıdır.' })
   newPassword: string;
+}
+
+class ConfirmChildElderLogoutDto {
+  @IsString()
+  @Matches(/^\d{6}$/, { message: 'Doğrulama kodu 6 haneli olmalıdır.' })
+  code: string;
 }
 
 @Controller('auth')
@@ -81,6 +93,36 @@ export class AuthController {
       throw new UnauthorizedException('Oturum bilgisi bulunamadı.');
     }
     return this.authService.logout(user.sessionId);
+  }
+
+  @Throttle({ default: { limit: 5, ttl: 15 * 60_000 } })
+  @UseGuards(JwtAuthGuard)
+  @Post('logout/approval')
+  requestChildElderLogoutApproval(@GetUser() user: AuthenticatedUser) {
+    if (!user.sessionId) {
+      throw new UnauthorizedException('Oturum bilgisi bulunamadı.');
+    }
+    return this.authService.requestChildElderLogoutApproval(
+      user.id,
+      user.sessionId,
+    );
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 15 * 60_000 } })
+  @UseGuards(JwtAuthGuard)
+  @Post('logout/confirm')
+  confirmChildElderLogout(
+    @GetUser() user: AuthenticatedUser,
+    @Body() dto: ConfirmChildElderLogoutDto,
+  ) {
+    if (!user.sessionId) {
+      throw new UnauthorizedException('Oturum bilgisi bulunamadı.');
+    }
+    return this.authService.confirmChildElderLogout(
+      user.id,
+      user.sessionId,
+      dto.code,
+    );
   }
 
   @UseGuards(JwtAuthGuard)

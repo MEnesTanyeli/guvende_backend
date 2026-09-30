@@ -14,15 +14,18 @@ const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
 const users_service_1 = require("../users/users.service");
 const client_1 = require("@prisma/client");
-const locations_gateway_1 = require("../locations/locations.gateway");
+const notifications_service_1 = require("../notifications/notifications.service");
+const subscription_entitlement_service_1 = require("../common/subscription-entitlement.service");
 let MedicationsService = class MedicationsService {
     prisma;
     usersService;
-    locationsGateway;
-    constructor(prisma, usersService, locationsGateway) {
+    notificationsService;
+    subscriptionEntitlement;
+    constructor(prisma, usersService, notificationsService, subscriptionEntitlement) {
         this.prisma = prisma;
         this.usersService = usersService;
-        this.locationsGateway = locationsGateway;
+        this.notificationsService = notificationsService;
+        this.subscriptionEntitlement = subscriptionEntitlement;
     }
     async createReminder(creatorId, dto) {
         const creatorProfile = await this.usersService.findOne(creatorId);
@@ -54,6 +57,7 @@ let MedicationsService = class MedicationsService {
         if (!commonFamily) {
             throw new common_1.ForbiddenException('Bu üyeye ilaç hatırlatıcısı ekleme yetkiniz yok.');
         }
+        await this.subscriptionEntitlement.assertFamilyEntitled(commonFamily.familyId);
         return this.prisma.medicationReminder.create({
             data: {
                 userId: dto.userId,
@@ -66,10 +70,48 @@ let MedicationsService = class MedicationsService {
             },
         });
     }
-    async getReminders(userId) {
+    async getReminders(requesterId, targetUserId) {
+        if (requesterId !== targetUserId) {
+            const authorizedMembership = await this.prisma.familyMember.findFirst({
+                where: {
+                    userId: targetUserId,
+                    memberType: { in: [client_1.MemberType.child, client_1.MemberType.elder] },
+                    family: {
+                        members: {
+                            some: {
+                                userId: requesterId,
+                                memberType: client_1.MemberType.guardian,
+                            },
+                        },
+                    },
+                },
+                select: { id: true, familyId: true },
+            });
+            if (!authorizedMembership) {
+                const targetUser = await this.prisma.user.findUnique({
+                    where: { id: targetUserId },
+                    select: { id: true },
+                });
+                if (targetUser) {
+                    throw new common_1.ForbiddenException('Bu kullanıcının ilaç bilgilerini görmeye yetkiniz yok.');
+                }
+            }
+            else {
+                await this.subscriptionEntitlement.assertFamilyEntitled(authorizedMembership.familyId);
+            }
+        }
+        else {
+            const membership = await this.prisma.familyMember.findFirst({
+                where: { userId: targetUserId },
+                select: { familyId: true },
+            });
+            if (membership) {
+                await this.subscriptionEntitlement.assertFamilyEntitled(membership.familyId);
+            }
+        }
         return this.prisma.medicationReminder.findMany({
             where: {
-                userId,
+                userId: targetUserId,
                 isActive: true,
             },
             orderBy: {
@@ -100,6 +142,7 @@ let MedicationsService = class MedicationsService {
         if (!commonFamily) {
             throw new common_1.ForbiddenException('Bu ilaç hatırlatıcısını silme yetkiniz yok.');
         }
+        await this.subscriptionEntitlement.assertFamilyEntitled(commonFamily.familyId);
         return this.prisma.medicationReminder.delete({
             where: { id: reminderId },
         });
@@ -146,33 +189,21 @@ let MedicationsService = class MedicationsService {
             message = `${reminder.user.name} isimli üye "${reminder.medicationName}" alarm uyarısını onayladı.`;
         }
         for (const membership of memberships) {
-            const alert = await this.prisma.alert.create({
-                data: {
-                    familyId: membership.familyId,
-                    userId: userId,
-                    type: client_1.AlertType.medication_taken,
-                    title,
-                    message,
-                    status: client_1.AlertStatus.active,
-                    metadata: {
-                        reminderId,
-                        medicationName: reminder.medicationName,
-                        dosage: reminder.dosage,
-                        time: reminder.time,
-                        reminderType: rType,
-                    },
+            await this.notificationsService.raiseFamilyAlert({
+                familyId: membership.familyId,
+                userId,
+                type: client_1.AlertType.medication_taken,
+                title,
+                message,
+                metadata: {
+                    reminderId,
+                    medicationName: reminder.medicationName,
+                    dosage: reminder.dosage,
+                    time: reminder.time,
+                    reminderType: rType,
                 },
-                include: {
-                    user: {
-                        select: {
-                            id: true,
-                            name: true,
-                            email: true,
-                        },
-                    },
-                },
+                delivery: 'socket',
             });
-            this.locationsGateway.sendAlertNotification(membership.familyId, alert);
         }
         return updated;
     }
@@ -199,6 +230,7 @@ let MedicationsService = class MedicationsService {
         if (!commonFamily) {
             throw new common_1.ForbiddenException('Bu hatırlatıcıyı düzenleme yetkiniz yok.');
         }
+        await this.subscriptionEntitlement.assertFamilyEntitled(commonFamily.familyId);
         return this.prisma.medicationReminder.update({
             where: { id: reminderId },
             data: {
@@ -207,7 +239,11 @@ let MedicationsService = class MedicationsService {
                 time: dto.time,
                 reminderType: dto.reminderType,
                 startDate: dto.startDate ? new Date(dto.startDate) : undefined,
-                repeatDays: dto.repeatDays !== undefined ? (dto.repeatDays ? Number(dto.repeatDays) : null) : undefined,
+                repeatDays: dto.repeatDays !== undefined
+                    ? dto.repeatDays
+                        ? Number(dto.repeatDays)
+                        : null
+                    : undefined,
             },
         });
     }
@@ -217,6 +253,7 @@ exports.MedicationsService = MedicationsService = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
         users_service_1.UsersService,
-        locations_gateway_1.LocationsGateway])
+        notifications_service_1.NotificationsService,
+        subscription_entitlement_service_1.SubscriptionEntitlementService])
 ], MedicationsService);
 //# sourceMappingURL=medications.service.js.map

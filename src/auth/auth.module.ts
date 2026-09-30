@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { PassportModule } from '@nestjs/passport';
@@ -7,6 +7,7 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { UsersModule } from '../users/users.module';
 import { MailModule } from '../mail/mail.module';
+import { LocationsModule } from '../locations/locations.module';
 
 @Module({
   imports: [
@@ -21,7 +22,8 @@ import { MailModule } from '../mail/mail.module';
         },
       }),
     }),
-    UsersModule,
+    forwardRef(() => UsersModule),
+    forwardRef(() => LocationsModule),
     MailModule,
   ],
   providers: [AuthService, JwtStrategy],

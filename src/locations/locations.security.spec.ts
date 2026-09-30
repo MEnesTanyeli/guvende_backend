@@ -1,9 +1,34 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { MemberType } from '@prisma/client';
 import { LocationsService } from './locations.service';
 import { LocationsGateway } from './locations.gateway';
 
 describe('Location and WebSocket isolation', () => {
+  it('rejects more than 250 bulk points before touching persistence', async () => {
+    const prisma: any = {
+      user: { findUnique: jest.fn() },
+      location: { findUnique: jest.fn(), create: jest.fn() },
+    };
+    const service = new LocationsService(prisma, {} as any, {} as any);
+    const locations = Array.from({ length: 251 }, (_, index) => ({
+      latitude: 41,
+      longitude: 29,
+      devicePointId: `point-${index}`,
+      measuredAt: new Date(Date.now() - index * 1000).toISOString(),
+    }));
+
+    await expect(
+      service.recordBulkLocations('user', { locations }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(prisma.location.findUnique).not.toHaveBeenCalled();
+    expect(prisma.location.create).not.toHaveBeenCalled();
+  });
+
   it('rejects latest-location access from a non-member', async () => {
     const prisma: any = {
       familyMember: { findUnique: jest.fn().mockResolvedValue(null) },
@@ -28,6 +53,7 @@ describe('Location and WebSocket isolation', () => {
           .mockResolvedValue({ memberType: MemberType.child }),
       },
       safeZone: { findMany: jest.fn().mockResolvedValue([]) },
+      geofenceState: { findFirst: jest.fn().mockResolvedValue(null) },
       location: { findFirst: jest.fn().mockResolvedValue(ownLocation) },
     };
     const service = new LocationsService(prisma, {} as any, {} as any);
@@ -81,7 +107,9 @@ describe('Location and WebSocket isolation', () => {
         }),
       }),
     );
-    expect(findMany.mock.calls[0][0].where).not.toHaveProperty('movementStatus');
+    expect(findMany.mock.calls[0][0].where).not.toHaveProperty(
+      'movementStatus',
+    );
   });
 
   it('acknowledges each bulk location by its device point id', async () => {
@@ -89,10 +117,16 @@ describe('Location and WebSocket isolation', () => {
       user: { findUnique: jest.fn().mockResolvedValue({ id: 'u1' }) },
       location: {
         create: jest.fn().mockResolvedValue({ id: 'stored-1' }),
-        findUnique: jest.fn().mockResolvedValue({ id: 'stored-2' }),
+        findUnique: jest
+          .fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({ id: 'stored-2' }),
       },
     };
     const service = new LocationsService(prisma, {} as any, {} as any);
+    jest
+      .spyOn(service, 'recordLocation')
+      .mockResolvedValue({ id: 'stored-1' } as any);
     const result = await service.recordBulkLocations('u1', {
       locations: [
         {
@@ -192,5 +226,32 @@ describe('Location and WebSocket isolation', () => {
     );
     expect(result.status).toBe('error');
     expect(client.join).not.toHaveBeenCalled();
+  });
+
+  it('revokes every active socket from only the requested family room', async () => {
+    const gateway = new LocationsGateway({} as any, {} as any);
+    const first = { leave: jest.fn().mockResolvedValue(undefined) };
+    const second = { leave: jest.fn().mockResolvedValue(undefined) };
+    gateway.server = {
+      sockets: { sockets: new Map([['socket-1', first], ['socket-2', second]]) },
+    } as any;
+    (gateway as any).activeUsers.set('u1', new Set(['socket-1', 'socket-2']));
+
+    await gateway.revokeFamilyAccess('u1', 'family-a');
+
+    expect(first.leave).toHaveBeenCalledWith('family_family-a');
+    expect(second.leave).toHaveBeenCalledWith('family_family-a');
+  });
+
+  it('logs a socket room-revocation failure without closing the socket', async () => {
+    const gateway = new LocationsGateway({} as any, {} as any);
+    const leave = jest.fn().mockRejectedValue(new Error('adapter unavailable'));
+    gateway.server = { sockets: { sockets: new Map([['socket-1', { leave }]]) } } as any;
+    (gateway as any).activeUsers.set('u1', new Set(['socket-1']));
+    const logError = jest.spyOn((gateway as any).logger, 'error');
+
+    await expect(gateway.revokeFamilyAccess('u1', 'family-a')).resolves.toBeUndefined();
+
+    expect(logError).toHaveBeenCalled();
   });
 });

@@ -28,8 +28,8 @@ let MedicationsController = class MedicationsController {
     async createReminder(creatorId, dto) {
         return this.medicationsService.createReminder(creatorId, dto);
     }
-    async getReminders(userId) {
-        return this.medicationsService.getReminders(userId);
+    async getReminders(requesterId, targetUserId) {
+        return this.medicationsService.getReminders(requesterId, targetUserId);
     }
     async deleteReminder(deleterId, reminderId) {
         return this.medicationsService.deleteReminder(reminderId, deleterId);
@@ -52,9 +52,10 @@ __decorate([
 ], MedicationsController.prototype, "createReminder", null);
 __decorate([
     (0, common_1.Get)('user/:userId'),
-    __param(0, (0, common_1.Param)('userId')),
+    __param(0, (0, get_user_decorator_1.GetUser)('id')),
+    __param(1, (0, common_1.Param)('userId')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
+    __metadata("design:paramtypes", [String, String]),
     __metadata("design:returntype", Promise)
 ], MedicationsController.prototype, "getReminders", null);
 __decorate([

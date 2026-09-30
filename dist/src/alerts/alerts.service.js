@@ -13,12 +13,16 @@ exports.AlertsService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
 const client_1 = require("@prisma/client");
+const subscription_entitlement_service_1 = require("../common/subscription-entitlement.service");
 let AlertsService = class AlertsService {
     prisma;
-    constructor(prisma) {
+    subscriptionEntitlement;
+    constructor(prisma, subscriptionEntitlement) {
         this.prisma = prisma;
+        this.subscriptionEntitlement = subscriptionEntitlement;
     }
     async findAll(userId, familyId) {
+        await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
         const membership = await this.prisma.familyMember.findUnique({
             where: {
                 familyId_userId: {
@@ -42,7 +46,6 @@ let AlertsService = class AlertsService {
                     select: {
                         id: true,
                         name: true,
-                        email: true,
                     },
                 },
             },
@@ -58,6 +61,7 @@ let AlertsService = class AlertsService {
         if (!alert) {
             throw new common_1.NotFoundException('Alarm bulunamadı.');
         }
+        await this.subscriptionEntitlement.assertFamilyEntitled(alert.familyId);
         const membership = await this.prisma.familyMember.findUnique({
             where: {
                 familyId_userId: {
@@ -81,6 +85,7 @@ let AlertsService = class AlertsService {
         });
     }
     async resolveAll(userId, familyId) {
+        await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
         const membership = await this.prisma.familyMember.findUnique({
             where: {
                 familyId_userId: {
@@ -110,6 +115,7 @@ let AlertsService = class AlertsService {
 exports.AlertsService = AlertsService;
 exports.AlertsService = AlertsService = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        subscription_entitlement_service_1.SubscriptionEntitlementService])
 ], AlertsService);
 //# sourceMappingURL=alerts.service.js.map

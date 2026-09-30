@@ -29,47 +29,62 @@ enum AlertStatus {
   resolved
 }
 
+enum AudibleWarningStatus {
+  pending
+  received
+  muted
+  unanswered
+}
+
 model User {
-  id                        String               @id @default(uuid())
+  id                        String                     @id @default(uuid())
   name                      String
-  email                     String               @unique
+  email                     String                     @unique
   phone                     String?
   gender                    String?
   passwordHash              String
-  role                      String               @default("guardian")
-  trialEndsAt               DateTime             @default(now())
-  isPremium                 Boolean              @default(false)
+  role                      String                     @default("guardian")
+  trialEndsAt               DateTime                   @default(now())
+  isPremium                 Boolean                    @default(false)
   premiumExpiresAt          DateTime?
-  isLocked                  Boolean              @default(false)
+  isLocked                  Boolean                    @default(false)
   deviceId                  String?
-  loginAllowed              Boolean              @default(false)
-  proxyId                   String?
-  proxy                     User?                @relation("UserProxy", fields: [proxyId], references: [id])
-  proxiedBy                 User[]               @relation("UserProxy")
-  createdAt                 DateTime             @default(now())
-  updatedAt                 DateTime             @updatedAt
-  familiesOwned             Family[]             @relation("FamilyOwner")
+  loginAllowed              Boolean                    @default(false)
+  deviceLoginBlocked        Boolean                    @default(false)
+  proxyId                   String?                    @unique
+  proxy                     User?                      @relation("UserProxy", fields: [proxyId], references: [id])
+  proxiedBy                 User?                      @relation("UserProxy")
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  familiesOwned             Family[]                   @relation("FamilyOwner")
   memberships               FamilyMember[]
   locations                 Location[]
+  guardianTrackingIntervals GuardianTrackingInterval[]
+  geofenceStates            GeofenceState[]
   alerts                    Alert[]
   sosEvents                 SosEvent[]
   activitySnapshots         ActivitySnapshot[]
   medicationReminders       MedicationReminder[]
   appUsages                 AppUsage[]
+  audibleWarningsSent       AudibleWarning[]           @relation("AudibleWarningSender")
+  audibleWarningsReceived   AudibleWarning[]           @relation("AudibleWarningTarget")
   resetOtpCode              String?
   resetOtpExpiresAt         DateTime?
-  resetOtpFailedAttempts    Int                  @default(0)
+  resetOtpFailedAttempts    Int                        @default(0)
   resetOtpBlockedUntil      DateTime?
   resetOtpLastSentAt        DateTime?
-  resetOtpHourlySendCount   Int                  @default(0)
+  resetOtpHourlySendCount   Int                        @default(0)
   resetOtpHourlyWindowStart DateTime?
-  resetOtpDailySendCount    Int                  @default(0)
+  resetOtpDailySendCount    Int                        @default(0)
   resetOtpDailyWindowStart  DateTime?
   emailChangeOtpCode        String?
   emailChangeNewEmail       String?
   emailChangeOtpExpiresAt   DateTime?
   devicePermissions         Json?
   sessions                  Session[]
+  logoutApprovalsAsSubject  ChildElderLogoutApproval[] @relation("LogoutApprovalSubject")
+  logoutApprovalsAsOwner    ChildElderLogoutApproval[] @relation("LogoutApprovalOwner")
+  offlineSosDevices         OfflineSosDeviceKey[]
   adminAuditLogs            AdminAuditLog[]
 
   @@map("users")
@@ -95,21 +110,56 @@ model Session {
 }
 
 model Family {
-  id         String         @id @default(uuid())
-  inviteCode String?        @unique
-  sosEncryptionKey String?
-  name       String
-  type       String         @default("children")
-  ownerId    String
-  owner      User           @relation("FamilyOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  members    FamilyMember[]
-  safeZones  SafeZone[]
-  alerts     Alert[]
-  sosEvents  SosEvent[]
-  createdAt  DateTime       @default(now())
-  updatedAt  DateTime       @updatedAt
+  id                        String                     @id @default(uuid())
+  inviteCode                String?                    @unique
+  sosEncryptionKey          String?
+  name                      String
+  type                      String                     @default("children")
+  ownerId                   String
+  owner                     User                       @relation("FamilyOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members                   FamilyMember[]
+  guardianTrackingIntervals GuardianTrackingInterval[]
+  safeZones                 SafeZone[]
+  alerts                    Alert[]
+  sosEvents                 SosEvent[]
+  audibleWarnings           AudibleWarning[]
+  offlineSosKeys            FamilyOfflineSosKey[]
+  logoutApprovals           ChildElderLogoutApproval[]
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
 
   @@map("families")
+}
+
+model FamilyOfflineSosKey {
+  id                  String    @id @default(uuid())
+  familyId            String
+  family              Family    @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  version             Int
+  publicKey           String
+  encryptedPrivateKey String
+  status              String    @default("active")
+  createdAt           DateTime  @default(now())
+  retiredAt           DateTime?
+
+  @@unique([familyId, version])
+  @@index([familyId, status])
+  @@map("family_offline_sos_keys")
+}
+
+model OfflineSosDeviceKey {
+  id                String    @id @default(uuid())
+  userId            String
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceId          String
+  wrappingPublicKey String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  revokedAt         DateTime?
+
+  @@unique([userId, deviceId])
+  @@index([userId, revokedAt])
+  @@map("offline_sos_device_keys")
 }
 
 model FamilyMember {
@@ -126,6 +176,19 @@ model FamilyMember {
 
   @@unique([familyId, userId])
   @@map("family_members")
+}
+
+model GuardianTrackingInterval {
+  id             String    @id @default(uuid())
+  familyId       String
+  family         Family    @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  guardianUserId String
+  guardian       User      @relation(fields: [guardianUserId], references: [id], onDelete: Cascade)
+  startedAt      DateTime  @default(now())
+  endedAt        DateTime?
+
+  @@index([familyId, guardianUserId, startedAt, endedAt], map: "guardian_tracking_intervals_lookup_idx")
+  @@map("guardian_tracking_intervals")
 }
 
 model Location {
@@ -147,45 +210,92 @@ model Location {
   deliveryMode     String   @default("live")
   deferredReason   String?
 
-  @@index([userId, recordedAt(sort: Desc)])
   @@unique([userId, devicePointId])
+  @@index([userId, recordedAt(sort: Desc)])
   @@map("locations")
 }
 
 model SafeZone {
-  id        String   @id @default(uuid())
-  familyId  String
-  family    Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
-  name      String
-  latitude  Float
-  longitude Float
-  radius    Float // metre cinsinden
-  createdBy String
-  createdAt DateTime @default(now())
+  id             String          @id @default(uuid())
+  familyId       String
+  family         Family          @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  name           String
+  latitude       Float
+  longitude      Float
+  radius         Float // metre cinsinden
+  createdBy      String
+  createdAt      DateTime        @default(now())
+  geofenceStates GeofenceState[]
 
   @@map("safe_zones")
 }
 
+model GeofenceState {
+  userId         String
+  safeZoneId     String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  safeZone       SafeZone  @relation(fields: [safeZoneId], references: [id], onDelete: Cascade)
+  status         String    @default("unknown")
+  candidate      String?
+  candidateCount Int       @default(0)
+  candidateSince DateTime?
+  lastObservedAt DateTime?
+  lastReliableAt DateTime?
+  lastLatitude   Float?
+  lastLongitude  Float?
+  lastAccuracy   Float?
+
+  @@id([userId, safeZoneId])
+  @@index([safeZoneId])
+  @@map("geofence_states")
+}
+
 model Alert {
-  id         String      @id @default(uuid())
-  familyId   String
-  family     Family      @relation(fields: [familyId], references: [id], onDelete: Cascade)
-  userId     String
-  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type       AlertType
-  title      String
-  message    String
-  status     AlertStatus @default(active)
-  metadata   Json?
-  createdAt  DateTime    @default(now())
-  resolvedAt DateTime?
+  id               String          @id @default(uuid())
+  familyId         String
+  family           Family          @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  userId           String
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type             AlertType
+  title            String
+  message          String
+  status           AlertStatus     @default(active)
+  metadata         Json?
+  createdAt        DateTime        @default(now())
+  resolvedAt       DateTime?
+  audibleWarningId String?         @unique
+  audibleWarning   AudibleWarning? @relation("AudibleWarningAlert", fields: [audibleWarningId], references: [id], onDelete: SetNull)
 
   @@index([familyId, status])
   @@map("alerts")
 }
 
+model AudibleWarning {
+  id              String               @id @default(uuid())
+  eventId         String?
+  familyId        String
+  family          Family               @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  senderId        String
+  sender          User                 @relation("AudibleWarningSender", fields: [senderId], references: [id], onDelete: Cascade)
+  targetUserId    String
+  target          User                 @relation("AudibleWarningTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
+  status          AudibleWarningStatus @default(pending)
+  acknowledgedAt  DateTime?
+  unansweredAlert Alert?               @relation("AudibleWarningAlert")
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@unique([senderId, targetUserId, eventId])
+  @@index([familyId, senderId])
+  @@index([targetUserId, status])
+  @@index([senderId, targetUserId, createdAt])
+  @@index([targetUserId, createdAt])
+  @@map("audible_warnings")
+}
+
 model SosEvent {
   id        String   @id @default(uuid())
+  eventId   String?
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   familyId  String
@@ -195,6 +305,8 @@ model SosEvent {
   message   String?
   createdAt DateTime @default(now())
 
+  @@unique([userId, familyId, eventId])
+  @@index([userId, familyId, createdAt])
   @@map("sos_events")
 }
 
@@ -260,6 +372,32 @@ model EmailVerification {
   dailyWindowStart  DateTime  @default(now())
 
   @@map("email_verifications")
+}
+
+model ChildElderLogoutApproval {
+  id                String    @id @default(uuid())
+  userId            String    @unique
+  user              User      @relation("LogoutApprovalSubject", fields: [userId], references: [id], onDelete: Cascade)
+  familyId          String
+  family            Family    @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  ownerId           String
+  owner             User      @relation("LogoutApprovalOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  tokenFamilyId     String
+  deviceId          String?
+  codeHash          String
+  expiresAt         DateTime
+  failedAttempts    Int       @default(0)
+  blockedUntil      DateTime?
+  lastSentAt        DateTime  @default(now())
+  hourlySendCount   Int       @default(1)
+  hourlyWindowStart DateTime  @default(now())
+  dailySendCount    Int       @default(1)
+  dailyWindowStart  DateTime  @default(now())
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([expiresAt])
+  @@map("child_elder_logout_approvals")
 }
 
 model AdminAuditLog {

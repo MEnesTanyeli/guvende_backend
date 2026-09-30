@@ -44,9 +44,10 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.NotificationsService = void 0;
 const common_1 = require("@nestjs/common");
+const https = __importStar(require("https"));
 const prisma_service_1 = require("../prisma/prisma.service");
 const locations_gateway_1 = require("../locations/locations.gateway");
-const https = __importStar(require("https"));
+const client_1 = require("@prisma/client");
 let NotificationsService = class NotificationsService {
     prisma;
     locationsGateway;
@@ -54,6 +55,112 @@ let NotificationsService = class NotificationsService {
     constructor(prisma, locationsGateway) {
         this.prisma = prisma;
         this.locationsGateway = locationsGateway;
+    }
+    async raiseFamilyAlert(input) {
+        if (input.dedupeActive) {
+            const activeAlert = await this.prisma.alert.findFirst({
+                where: {
+                    familyId: input.familyId,
+                    userId: input.userId,
+                    type: input.type,
+                    status: client_1.AlertStatus.active,
+                },
+            });
+            if (activeAlert) {
+                return activeAlert;
+            }
+        }
+        if (input.dedupeWindowMs && input.dedupeWindowMs > 0) {
+            const recentAlert = await this.prisma.alert.findFirst({
+                where: {
+                    familyId: input.familyId,
+                    userId: input.userId,
+                    type: input.type,
+                    createdAt: {
+                        gte: new Date(Date.now() - input.dedupeWindowMs),
+                    },
+                },
+                orderBy: { createdAt: 'desc' },
+            });
+            if (recentAlert) {
+                return recentAlert;
+            }
+        }
+        const alert = await this.prisma.alert.create({
+            data: {
+                familyId: input.familyId,
+                userId: input.userId,
+                type: input.type,
+                title: input.title,
+                message: input.message,
+                status: client_1.AlertStatus.active,
+                metadata: input.metadata,
+            },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        name: true,
+                        email: true,
+                    },
+                },
+            },
+        });
+        const delivery = input.delivery ?? 'family';
+        const notificationData = input.notificationData ?? {
+            type: input.type,
+            userId: input.userId,
+        };
+        if (delivery === 'family') {
+            await this.sendFamilyNotification(input.familyId, input.userId, input.title, input.message, notificationData);
+        }
+        else if (delivery === 'socket') {
+            await this.locationsGateway.sendAlertNotification(input.familyId, alert);
+        }
+        return alert;
+    }
+    async raiseUserAlertForFamilies(input) {
+        if (input.dedupeActiveByUser) {
+            const activeAlert = await this.prisma.alert.findFirst({
+                where: {
+                    userId: input.userId,
+                    type: input.type,
+                    status: client_1.AlertStatus.active,
+                },
+            });
+            if (activeAlert) {
+                return [];
+            }
+        }
+        const alerts = [];
+        for (const familyId of input.familyIds) {
+            const alert = await this.raiseFamilyAlert({
+                familyId,
+                userId: input.userId,
+                type: input.type,
+                title: input.title,
+                message: input.message,
+                metadata: input.metadata,
+                notificationData: input.notificationData,
+                delivery: input.delivery,
+            });
+            alerts.push(alert);
+        }
+        return alerts;
+    }
+    async resolveActiveAlerts(userId, types) {
+        const alertTypes = Array.isArray(types) ? types : [types];
+        return this.prisma.alert.updateMany({
+            where: {
+                userId,
+                type: { in: alertTypes },
+                status: client_1.AlertStatus.active,
+            },
+            data: {
+                status: client_1.AlertStatus.resolved,
+                resolvedAt: new Date(),
+            },
+        });
     }
     async sendOneSignalNotification(userIds, title, message, data) {
         const appId = process.env.ONESIGNAL_APP_ID;
@@ -70,12 +177,10 @@ let NotificationsService = class NotificationsService {
             include_external_user_ids: userIds,
             headings: { tr: title, en: title },
             contents: { tr: message, en: message },
-            data: data || {},
+            data: data ?? {},
         };
-        if (data && data.action === 'play_warning_sound') {
-            payload.buttons = [
-                { id: 'mute_warning', text: 'Sustur', icon: '' }
-            ];
+        if (data?.action === 'play_warning_sound') {
+            payload.buttons = [{ id: 'mute_warning', text: 'Sustur', icon: '' }];
             payload.android_ongoing = true;
         }
         const payloadStr = JSON.stringify(payload);
@@ -86,7 +191,7 @@ let NotificationsService = class NotificationsService {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json; charset=utf-8',
-                'Authorization': `Basic ${apiKey}`,
+                Authorization: `Basic ${apiKey}`,
                 'Content-Length': Buffer.byteLength(payloadStr),
             },
         };
@@ -115,7 +220,7 @@ let NotificationsService = class NotificationsService {
             select: { name: true, email: true },
         });
         const userName = user ? user.name : 'Bilinmeyen Kullanıcı';
-        this.logger.log(`[FCM SIMULASYONU] Bildirim Gönderilen Kullanıcı: ${userName} (${userId}) | Başlık: "${title}" | Mesaj: "${message}" | Ek Veri: ${JSON.stringify(data || {})}`);
+        this.logger.log(`[FCM SIMULASYONU] Bildirim Gönderilen Kullanıcı: ${userName} (${userId}) | Başlık: "${title}" | Mesaj: "${message}" | Ek Veri: ${JSON.stringify(data ?? {})}`);
         return { success: true, userId, title, message };
     }
     async sendFamilyNotification(familyId, senderId, title, message, data) {
@@ -134,7 +239,8 @@ let NotificationsService = class NotificationsService {
             where: {
                 familyId,
                 userId: { not: senderId },
-                muteNotifications: false,
+                ...(data?.type === client_1.AlertType.sos || data?.action === 'audible_warning_unanswered'
+                    ? {} : { muteNotifications: false }),
                 memberType: 'guardian',
             },
             select: {
@@ -142,20 +248,20 @@ let NotificationsService = class NotificationsService {
             },
         });
         this.logger.log(`[FCM SIMULASYONU] Aile Grubu (${familyId}) Bildirimi Tetiklendi. Gönderici: ${senderId} | Alıcı Sayısı: ${members.length}`);
-        this.locationsGateway.sendAlertNotification(familyId, {
+        await this.locationsGateway.sendAlertNotification(familyId, {
             title,
             message,
             senderId,
             senderRole: sender?.memberType,
             data: {
-                ...data,
+                ...(data ?? {}),
                 familyId,
             },
             createdAt: new Date(),
         });
         let targetUserIds = members.map((member) => member.userId);
         if (senderId) {
-            targetUserIds = targetUserIds.filter(id => id !== senderId);
+            targetUserIds = targetUserIds.filter((id) => id !== senderId);
         }
         if (targetUserIds.length > 0) {
             await this.sendOneSignalNotification(targetUserIds, title, message, data);

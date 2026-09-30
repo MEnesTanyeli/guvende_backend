@@ -9,7 +9,12 @@ import { CreateFamilyDto } from './dto/create-family.dto';
 import { JoinFamilyDto } from './dto/join-family.dto';
 import { AlertType, MemberType, Prisma } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
-import { randomBytes } from 'crypto';
+import { LocationsGateway } from '../locations/locations.gateway';
+import { randomBytes, randomInt } from 'crypto';
+import { OfflineSosService } from '../offline-sos/offline-sos.service';
+import { SubscriptionEntitlementService } from '../common/subscription-entitlement.service';
+
+const INVITE_CODE_WRITE_MAX_RETRIES = 3;
 
 @Injectable()
 export class FamiliesService {
@@ -18,21 +23,71 @@ export class FamiliesService {
   constructor(
     private prisma: PrismaService,
     private notificationsService: NotificationsService,
+    private locationsGateway: LocationsGateway,
+    private offlineSosService: OfflineSosService,
+    private subscriptionEntitlement: SubscriptionEntitlementService,
   ) {}
 
   private createInviteCode(length = 8): string {
     let code = '';
     for (let i = 0; i < length; i += 1) {
       code +=
-        this.inviteCodeAlphabet[
-          Math.floor(Math.random() * this.inviteCodeAlphabet.length)
-        ];
+        this.inviteCodeAlphabet[randomInt(this.inviteCodeAlphabet.length)];
     }
     return code;
   }
 
   private createSosEncryptionKey(): string {
     return randomBytes(32).toString('base64url');
+  }
+
+  private async lockUserMembership(
+    tx: Prisma.TransactionClient,
+    userId: string,
+  ): Promise<void> {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`family-membership-user:${userId}`}, 0))`;
+  }
+
+  private async lockFamilyMembership(
+    tx: Prisma.TransactionClient,
+    familyId: string,
+  ): Promise<void> {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`family-membership-family:${familyId}`}, 0))`;
+  }
+
+  private async dissolveOwnedFamily(
+    userId: string,
+    familyId: string,
+  ): Promise<void> {
+    const memberUserIds = await this.prisma.$transaction(async (tx) => {
+      await this.lockFamilyMembership(tx, familyId);
+
+      const family = await tx.family.findUnique({
+        where: { id: familyId },
+        select: {
+          ownerId: true,
+          members: { select: { userId: true } },
+        },
+      });
+
+      if (!family) {
+        throw new NotFoundException('Aile grubu bulunamadı.');
+      }
+      if (family.ownerId !== userId) {
+        throw new ForbiddenException(
+          'Sadece aile sahibi grubu silebilir/dağıtabilir.',
+        );
+      }
+
+      await tx.family.delete({ where: { id: familyId } });
+      return family.members.map((member) => member.userId);
+    });
+
+    await Promise.all(
+      memberUserIds.map((memberUserId) =>
+        this.locationsGateway.revokeFamilyAccess(memberUserId, familyId),
+      ),
+    );
   }
 
   private async generateUniqueInviteCode(
@@ -55,85 +110,151 @@ export class FamiliesService {
     );
   }
 
+  private isInviteCodeUniqueCollision(
+    error: unknown,
+  ): error is Prisma.PrismaClientKnownRequestError {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError)) {
+      return false;
+    }
+
+    if (error.code !== 'P2002') {
+      return false;
+    }
+
+    const target = error.meta?.target;
+    if (Array.isArray(target)) {
+      return target.includes('inviteCode');
+    }
+
+    return typeof target === 'string' && target.includes('inviteCode');
+  }
+
+  private async retryInviteCodeWrite<T>(write: () => Promise<T>): Promise<T> {
+    let lastInviteCodeCollision: unknown;
+
+    for (
+      let attempt = 0;
+      attempt <= INVITE_CODE_WRITE_MAX_RETRIES;
+      attempt += 1
+    ) {
+      try {
+        return await write();
+      } catch (error) {
+        if (!this.isInviteCodeUniqueCollision(error)) {
+          throw error;
+        }
+
+        lastInviteCodeCollision = error;
+      }
+    }
+
+    throw lastInviteCodeCollision;
+  }
+
   async create(userId: string, dto: CreateFamilyDto) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { role: true, proxyId: true },
-    });
-
-    const isGuardian = user && user.role !== 'child' && user.role !== 'elder';
-    if (!isGuardian) {
-      throw new ForbiddenException(
-        'Sadece veli hesapları yeni aile grubu oluşturabilir.',
-      );
-    }
-
-    const duplicateName = await this.prisma.family.findFirst({
-      where: {
-        ownerId: userId,
-        name: {
-          equals: dto.name,
-          mode: 'insensitive',
-        },
-      },
-    });
-
-    if (duplicateName) {
-      throw new ConflictException(
-        'Aynı isimde birden fazla aile grubu oluşturamazsınız.',
-      );
-    }
-
-    const totalMemberships = await this.prisma.familyMember.count({
-      where: { userId },
-    });
-
-    if (totalMemberships >= 2) {
-      throw new ForbiddenException(
-        'En fazla 2 aile grubunda yer alabilirsiniz.',
-      );
-    }
+    await this.subscriptionEntitlement.assertUserEntitled(userId);
 
     // Aile kaydını oluştur ve oluşturanı otomatik olarak guardian (veli/koruyucu) olarak ekle
-    return this.prisma.$transaction(async (tx) => {
-      const inviteCode = await this.generateUniqueInviteCode(tx);
-      const family = await tx.family.create({
-        data: {
-          inviteCode,
-          sosEncryptionKey: this.createSosEncryptionKey(),
-          name: dto.name,
-          type: dto.type || 'general',
-          ownerId: userId,
-        },
-      });
+    return this.retryInviteCodeWrite(() =>
+      this.prisma.$transaction(async (tx) => {
+        await this.lockUserMembership(tx, userId);
 
-      await tx.familyMember.create({
-        data: {
-          familyId: family.id,
-          userId: userId,
-          memberType: MemberType.guardian,
-          permissions: ['owner', 'all'],
-        },
-      });
+        const user = await tx.user.findUnique({
+          where: { id: userId },
+          select: {
+            role: true,
+            proxyId: true,
+            proxy: { select: { role: true } },
+          },
+        });
 
-      if (user.proxyId) {
+        const isGuardian = user?.role === MemberType.guardian;
+        if (!isGuardian) {
+          throw new ForbiddenException(
+            'Sadece veli hesapları yeni aile grubu oluşturabilir.',
+          );
+        }
+
+        const duplicateName = await tx.family.findFirst({
+          where: {
+            ownerId: userId,
+            name: {
+              equals: dto.name,
+              mode: 'insensitive',
+            },
+          },
+        });
+
+        if (duplicateName) {
+          throw new ConflictException(
+            'Aynı isimde birden fazla aile grubu oluşturamazsınız.',
+          );
+        }
+
+        const totalMemberships = await tx.familyMember.count({
+          where: { userId },
+        });
+
+        if (totalMemberships >= 2) {
+          throw new ForbiddenException(
+            'En fazla 2 aile grubunda yer alabilirsiniz.',
+          );
+        }
+
+        const inviteCode = await this.generateUniqueInviteCode(tx);
+        const family = await tx.family.create({
+          data: {
+            inviteCode,
+            sosEncryptionKey: this.createSosEncryptionKey(),
+            name: dto.name,
+            type: dto.type || 'general',
+            ownerId: userId,
+          },
+        });
+
         await tx.familyMember.create({
           data: {
             familyId: family.id,
-            userId: user.proxyId,
+            userId: userId,
             memberType: MemberType.guardian,
-            permissions: ['all'],
+            permissions: ['owner', 'all'],
           },
         });
-      }
 
-      return family;
-    });
+        await this.offlineSosService.createInitialKey(tx, family.id);
+
+        if (user.proxyId) {
+          if (!user.proxy || user.proxy.role !== MemberType.guardian) {
+            throw new ForbiddenException(
+              'Vekil kullanıcının guardian olması gerekir.',
+            );
+          }
+          await tx.familyMember.create({
+            data: {
+              familyId: family.id,
+              userId: user.proxyId,
+              memberType: MemberType.guardian,
+              permissions: ['all', 'proxy'],
+            },
+          });
+        }
+
+        return {
+          id: family.id,
+          name: family.name,
+          type: family.type,
+          ownerId: family.ownerId,
+          createdAt: family.createdAt,
+          updatedAt: family.updatedAt,
+          inviteCode: family.inviteCode,
+        };
+      }),
+    );
   }
 
   async findAll(userId: string) {
     // Kullanıcının üyesi olduğu tüm aileleri getir
-    return this.prisma.family.findMany({
+    const families = await this.prisma.family.findMany({
       where: {
         members: {
           some: {
@@ -141,12 +262,18 @@ export class FamiliesService {
           },
         },
       },
-      include: {
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        ownerId: true,
+        createdAt: true,
+        updatedAt: true,
+        inviteCode: true,
         owner: {
           select: {
             id: true,
             name: true,
-            email: true,
           },
         },
         members: {
@@ -164,6 +291,25 @@ export class FamiliesService {
         },
       },
     });
+    return families.map((family) => {
+      if (family.ownerId === userId) return family;
+      const { inviteCode: _inviteCode, ...safeFamily } = family;
+      return safeFamily;
+    });
+  }
+
+  offlineSosProvisioning(
+    userId: string,
+    sessionId: string,
+    familyId: string,
+    deviceWrappingPublicKey?: string,
+  ) {
+    return this.offlineSosService.provision(
+      userId,
+      sessionId,
+      familyId,
+      deviceWrappingPublicKey,
+    );
   }
 
   async findOne(userId: string, familyId: string) {
@@ -183,32 +329,39 @@ export class FamiliesService {
       );
     }
 
+    const requesterIsGuardian = isMember.memberType === MemberType.guardian;
     const family = await this.prisma.family.findUnique({
       where: { id: familyId },
-      include: {
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        ownerId: true,
+        createdAt: true,
+        updatedAt: true,
+        inviteCode: true,
         owner: {
           select: {
             id: true,
             name: true,
-            email: true,
           },
         },
         members: {
-          include: {
+          select: {
+            id: true,
+            userId: true,
+            memberType: true,
+            muteNotifications: true,
+            guardianTrackingEnabled: true,
             user: {
               select: {
                 id: true,
                 name: true,
-                email: true,
-                phone: true,
-                gender: true,
-                isLocked: true,
-                devicePermissions: true,
               },
             },
           },
         },
-        safeZones: true,
+        ...(requesterIsGuardian ? { safeZones: true } : {}),
       },
     });
 
@@ -216,18 +369,57 @@ export class FamiliesService {
       throw new NotFoundException('Aile grubu bulunamadı.');
     }
 
-    if (!family.sosEncryptionKey) {
-      family.sosEncryptionKey = this.createSosEncryptionKey();
+    const familyWithKey = await this.prisma.family.findUnique({
+      where: { id: family.id },
+      select: { sosEncryptionKey: true },
+    });
+    if (!familyWithKey?.sosEncryptionKey) {
+      const sosEncryptionKey = this.createSosEncryptionKey();
       await this.prisma.family.update({
         where: { id: family.id },
-        data: { sosEncryptionKey: family.sosEncryptionKey },
+        data: { sosEncryptionKey },
       });
     }
 
-    return family;
+    const members = family.members.map((member) => {
+      const isSelf = member.userId === userId;
+      const visibleGuardianTracking =
+        requesterIsGuardian && member.memberType === MemberType.guardian;
+
+      return {
+        id: member.id,
+        userId: member.userId,
+        memberType: member.memberType,
+        user: member.user,
+        ...(isSelf ? { muteNotifications: member.muteNotifications } : {}),
+        ...(isSelf || visibleGuardianTracking
+          ? { guardianTrackingEnabled: member.guardianTrackingEnabled }
+          : {}),
+      };
+    });
+    const safeFamily = { ...family, members };
+
+    if (family.ownerId === userId) return safeFamily;
+    const { inviteCode: _inviteCode, ...nonOwnerFamily } = safeFamily;
+    return nonOwnerFamily;
   }
 
   async invite(userId: string, familyId: string) {
+    const ownerFamily = await this.prisma.family.findUnique({
+      where: { id: familyId },
+      select: { ownerId: true },
+    });
+
+    if (!ownerFamily) {
+      throw new NotFoundException('Aile grubu bulunamadi.');
+    }
+
+    if (ownerFamily.ownerId !== userId) {
+      throw new ForbiddenException(
+        'Yalnizca aile sahibi davet kodu olusturabilir.',
+      );
+    }
+
     // Sadece veliler/koruyucular (guardian) davet kodu alabilir
     const membership = await this.prisma.familyMember.findUnique({
       where: {
@@ -259,10 +451,15 @@ export class FamiliesService {
 
     let inviteCode = family.inviteCode;
     if (!inviteCode) {
-      inviteCode = await this.generateUniqueInviteCode(this.prisma);
-      await this.prisma.family.update({
-        where: { id: familyId },
-        data: { inviteCode },
+      inviteCode = await this.retryInviteCodeWrite(async () => {
+        const nextInviteCode = await this.generateUniqueInviteCode(this.prisma);
+        const updatedFamily = await this.prisma.family.update({
+          where: { id: familyId },
+          data: { inviteCode: nextInviteCode },
+          select: { inviteCode: true },
+        });
+
+        return updatedFamily.inviteCode;
       });
     }
 
@@ -274,191 +471,141 @@ export class FamiliesService {
     };
   }
 
+  async rotateInviteCode(userId: string, familyId: string) {
+    return this.retryInviteCodeWrite(() =>
+      this.prisma.$transaction(async (tx) => {
+        await this.lockFamilyMembership(tx, familyId);
+
+        const family = await tx.family.findUnique({
+          where: { id: familyId },
+          select: { ownerId: true },
+        });
+
+        if (!family) {
+          throw new NotFoundException('Aile grubu bulunamadi.');
+        }
+
+        if (family.ownerId !== userId) {
+          throw new ForbiddenException(
+            'Yalnizca aile sahibi davet kodunu yenileyebilir.',
+          );
+        }
+
+        const inviteCode = await this.generateUniqueInviteCode(tx);
+        await tx.family.update({
+          where: { id: familyId },
+          data: { inviteCode },
+        });
+
+        return { inviteCode };
+      }),
+    );
+  }
+
   async join(userId: string, dto: JoinFamilyDto) {
-    const familyIdOrInviteCode = dto.familyId.trim();
-    const inviteCode = familyIdOrInviteCode.toUpperCase();
-    const family = await this.prisma.family.findFirst({
-      where: {
-        OR: [{ inviteCode }, { id: familyIdOrInviteCode }],
-      },
-    });
+    const inviteCode = dto.inviteCode.trim().toUpperCase();
+    return this.prisma.$transaction(async (tx) => {
+      const initialFamily = await tx.family.findUnique({
+        where: { inviteCode },
+        select: { id: true },
+      });
 
-    if (!family) {
-      throw new NotFoundException('Geçersiz aile davet kodu.');
-    }
+      if (!initialFamily) {
+        throw new NotFoundException('Geçersiz aile davet kodu.');
+      }
 
-    const joiningUser = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { role: true },
-    });
+      // Membership mutations always acquire user before family locks.
+      await this.lockUserMembership(tx, userId);
+      await this.lockFamilyMembership(tx, initialFamily.id);
 
-    if (!joiningUser) {
-      throw new NotFoundException('Kullanıcı bulunamadı.');
-    }
+      const family = await tx.family.findUnique({
+        where: { inviteCode },
+        select: { id: true },
+      });
 
-    // Üyelik limit kontrolü
-    const currentMembershipsCount = await this.prisma.familyMember.count({
-      where: { userId },
-    });
+      if (!family || family.id !== initialFamily.id) {
+        throw new NotFoundException('Geçersiz aile davet kodu.');
+      }
 
-    const isGuardian =
-      joiningUser.role !== 'child' && joiningUser.role !== 'elder';
-    if (isGuardian) {
-      if (currentMembershipsCount >= 2) {
+      const joiningUser = await tx.user.findUnique({
+        where: { id: userId },
+        select: { role: true },
+      });
+
+      if (!joiningUser) {
+        throw new NotFoundException('Kullanıcı bulunamadı.');
+      }
+
+      if (!Object.values(MemberType).includes(joiningUser.role as MemberType)) {
         throw new ForbiddenException(
-          'Veliler en fazla 2 aile grubunda yer alabilir.',
+          'Kullanıcı profil tipi aile üyeliği için uygun değil.',
         );
       }
-    } else {
-      if (currentMembershipsCount >= 1) {
+
+      // Üyelik limit kontrolü
+      const currentMembershipsCount = await tx.familyMember.count({
+        where: { userId },
+      });
+
+      const isGuardian =
+        joiningUser.role !== 'child' && joiningUser.role !== 'elder';
+      if (isGuardian) {
+        if (currentMembershipsCount >= 2) {
+          throw new ForbiddenException(
+            'Veliler en fazla 2 aile grubunda yer alabilir.',
+          );
+        }
+      } else if (currentMembershipsCount >= 1) {
         throw new ForbiddenException(
           'Çocuklar veya aile büyükleri sadece 1 aile grubunda yer alabilir.',
         );
       }
-    }
 
-    const existingMember = await this.prisma.familyMember.findUnique({
-      where: {
-        familyId_userId: {
-          familyId: family.id,
-          userId,
-        },
-      },
-    });
-
-    if (existingMember) {
-      throw new ConflictException('Zaten bu aile grubunun bir üyesisiniz.');
-    }
-
-    const memberTypeToUse =
-      dto.memberType || (joiningUser.role as MemberType) || MemberType.child;
-
-    if (memberTypeToUse === MemberType.guardian) {
-      const guardianCount = await this.prisma.familyMember.count({
+      const existingMember = await tx.familyMember.findUnique({
         where: {
-          familyId: family.id,
-          memberType: MemberType.guardian,
+          familyId_userId: {
+            familyId: family.id,
+            userId,
+          },
         },
       });
 
-      if (guardianCount >= 2) {
-        throw new ForbiddenException(
-          'Bu aile grubunda zaten maksimum veli (2) sınırına ulaşılmış.',
-        );
+      if (existingMember) {
+        throw new ConflictException('Zaten bu aile grubunun bir üyesisiniz.');
       }
-    }
 
-    return this.prisma.familyMember.create({
-      data: {
-        familyId: family.id,
-        userId: userId,
-        memberType: memberTypeToUse,
-        permissions: [],
-      },
-      include: {
-        family: {
-          select: {
-            name: true,
+      const memberTypeToUse = joiningUser.role as MemberType;
+
+      if (memberTypeToUse === MemberType.guardian) {
+        const guardianCount = await tx.familyMember.count({
+          where: {
+            familyId: family.id,
+            memberType: MemberType.guardian,
           },
-        },
-      },
-    });
-  }
+        });
 
-  async updateMemberRole(
-    userId: string,
-    familyId: string,
-    targetUserId: string,
-    newRole: string,
-  ) {
-    // 1. Yetki Kontrolü: İstek yapan kişi bu aile grubunda "guardian" (veli) mi?
-    const editorMembership = await this.prisma.familyMember.findUnique({
-      where: {
-        familyId_userId: {
-          familyId,
+        if (guardianCount >= 2) {
+          throw new ForbiddenException(
+            'Bu aile grubunda zaten maksimum veli (2) sınırına ulaşılmış.',
+          );
+        }
+      }
+
+      return tx.familyMember.create({
+        data: {
+          familyId: family.id,
           userId,
+          memberType: memberTypeToUse,
+          permissions: [],
         },
-      },
-    });
-
-    if (!editorMembership) {
-      throw new ForbiddenException('Bu aile grubuna üye değilsiniz.');
-    }
-
-    if (editorMembership.memberType !== MemberType.guardian) {
-      throw new ForbiddenException(
-        'Sadece koruyucu (guardian) üyeler başkalarının rollerini değiştirebilir.',
-      );
-    }
-
-    // 2. Güncelleme yapılacak üyenin varlığını kontrol et
-    const targetMembership = await this.prisma.familyMember.findUnique({
-      where: {
-        familyId_userId: {
-          familyId,
-          userId: targetUserId,
-        },
-      },
-    });
-
-    if (!targetMembership) {
-      throw new NotFoundException(
-        'Güncellenmek istenen aile üyesi grupta bulunamadı.',
-      );
-    }
-
-    // Aile sahibinin (owner) rolünü değiştirmeyi engelleyelim (veya grup kurucusunu)
-    const family = await this.prisma.family.findUnique({
-      where: { id: familyId },
-    });
-    if (family && family.ownerId === targetUserId) {
-      throw new ForbiddenException('Grup sahibinin rolü değiştirilemez.');
-    }
-
-    // 3. Rolü güncelle
-    if (!Object.values(MemberType).includes(newRole as MemberType)) {
-      throw new ConflictException('Geçersiz üye tipi.');
-    }
-
-    if (
-      newRole === MemberType.guardian &&
-      targetMembership.memberType !== MemberType.guardian
-    ) {
-      const guardianCount = await this.prisma.familyMember.count({
-        where: {
-          familyId: familyId,
-          memberType: MemberType.guardian,
+        include: {
+          family: {
+            select: {
+              name: true,
+            },
+          },
         },
       });
-
-      if (guardianCount >= 2) {
-        throw new ForbiddenException(
-          'Bu aile grubunda zaten maksimum veli (2) sınırına ulaşılmış.',
-        );
-      }
-    }
-
-    return this.prisma.familyMember.update({
-      where: {
-        familyId_userId: {
-          familyId,
-          userId: targetUserId,
-        },
-      },
-      data: {
-        memberType: newRole as MemberType,
-        guardianTrackingEnabled: false,
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            gender: true,
-          },
-        },
-      },
     });
   }
 
@@ -482,6 +629,10 @@ export class FamiliesService {
 
     if (!family) {
       throw new NotFoundException('Aile grubu bulunamadı.');
+    }
+
+    if (family.ownerId === userId) {
+      return this.deleteFamily(userId, familyId);
     }
 
     // Veli ayrılma kontrolü
@@ -514,12 +665,22 @@ export class FamiliesService {
       });
     }
 
-    // Üyelik kaydını sil
-    await this.prisma.familyMember.delete({
-      where: {
-        familyId_userId: { familyId, userId },
-      },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.geofenceState.deleteMany({
+        where: { userId, safeZone: { familyId } },
+      });
+      await tx.familyMember.delete({
+        where: { familyId_userId: { familyId, userId } },
+      });
+      if (membership.memberType === MemberType.guardian) {
+        await tx.guardianTrackingInterval.updateMany({
+          where: { familyId, guardianUserId: userId, endedAt: null },
+          data: { endedAt: new Date() },
+        });
+        await this.offlineSosService.rotateKey(tx, familyId);
+      }
     });
+    await this.locationsGateway.revokeFamilyAccess(userId, familyId);
 
     return {
       success: true,
@@ -527,20 +688,20 @@ export class FamiliesService {
     };
   }
 
-  // Gruptan Üye Çıkarma (Veli Yetkisiyle Kick)
+  // Gruptan Üye Çıkarma (Aile sahibi yetkisiyle)
   async removeMember(userId: string, familyId: string, targetUserId: string) {
-    const editorMembership = await this.prisma.familyMember.findUnique({
-      where: {
-        familyId_userId: { familyId, userId },
-      },
+    const family = await this.prisma.family.findUnique({
+      where: { id: familyId },
+      select: { ownerId: true, owner: { select: { proxyId: true } } },
     });
 
-    if (
-      !editorMembership ||
-      editorMembership.memberType !== MemberType.guardian
-    ) {
+    if (!family) {
+      throw new NotFoundException('Aile grubu bulunamadı.');
+    }
+
+    if (family.ownerId !== userId) {
       throw new ForbiddenException(
-        'Sadece veli (guardian) rolündeki üyeler gruptan üye çıkarabilir.',
+        'Sadece aile sahibi gruptan üye çıkarabilir.',
       );
     }
 
@@ -557,14 +718,6 @@ export class FamiliesService {
       );
     }
 
-    const family = await this.prisma.family.findUnique({
-      where: { id: familyId },
-    });
-
-    if (!family) {
-      throw new NotFoundException('Aile grubu bulunamadı.');
-    }
-
     if (family.ownerId === targetUserId) {
       throw new ForbiddenException('Grup kurucusu/sahibi gruptan çıkarılamaz.');
     }
@@ -572,6 +725,12 @@ export class FamiliesService {
     if (userId === targetUserId) {
       throw new ForbiddenException(
         'Kendinizi gruptan çıkaramazsınız. Gruptan ayrılmak için "Ayrıl" özelliğini kullanın.',
+      );
+    }
+
+    if (family.owner.proxyId === targetUserId) {
+      throw new ConflictException(
+        'Mevcut vekil normal üye çıkarma işlemiyle kaldırılamaz. Vekalet işlemlerindeki "Vekili Kaldır" seçeneğini kullanın.',
       );
     }
 
@@ -593,12 +752,26 @@ export class FamiliesService {
       });
     }
 
-    // Üyelik kaydını sil
-    await this.prisma.familyMember.delete({
-      where: {
-        familyId_userId: { familyId, userId: targetUserId },
-      },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.geofenceState.deleteMany({
+        where: { userId: targetUserId, safeZone: { familyId } },
+      });
+      await tx.familyMember.delete({
+        where: { familyId_userId: { familyId, userId: targetUserId } },
+      });
+      if (targetMembership.memberType === MemberType.guardian) {
+        await tx.guardianTrackingInterval.updateMany({
+          where: {
+            familyId,
+            guardianUserId: targetUserId,
+            endedAt: null,
+          },
+          data: { endedAt: new Date() },
+        });
+        await this.offlineSosService.rotateKey(tx, familyId);
+      }
     });
+    await this.locationsGateway.revokeFamilyAccess(targetUserId, familyId);
 
     return {
       success: true,
@@ -608,22 +781,7 @@ export class FamiliesService {
 
   // Aile Grubunu Tamamen Silme/Dağıtma
   async deleteFamily(userId: string, familyId: string) {
-    const membership = await this.prisma.familyMember.findUnique({
-      where: {
-        familyId_userId: { familyId, userId },
-      },
-    });
-
-    if (!membership || membership.memberType !== MemberType.guardian) {
-      throw new ForbiddenException(
-        'Sadece veli (guardian) üyeler grubu silebilir/dağıtabilir.',
-      );
-    }
-
-    // Family tablosundaki kaydı siler, ilişkili üyeler, alarmlar, bölgeler CASCADE ile silinir
-    await this.prisma.family.delete({
-      where: { id: familyId },
-    });
+    await this.dissolveOwnedFamily(userId, familyId);
 
     return {
       success: true,
@@ -658,40 +816,62 @@ export class FamiliesService {
     });
   }
 
-  async updateOwnTracking(
-    userId: string,
-    familyId: string,
-    enabled: boolean,
-  ) {
-    const membership = await this.prisma.familyMember.findUnique({
-      where: {
-        familyId_userId: {
-          familyId,
-          userId,
-        },
-      },
-    });
-
-    if (!membership) {
-      throw new NotFoundException('Bu aile grubunun uyesi degilsiniz.');
+  async updateOwnTracking(userId: string, familyId: string, enabled: boolean) {
+    if (enabled) {
+      await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
     }
-
-    if (membership.memberType !== MemberType.guardian) {
-      throw new ForbiddenException(
-        'Cocuk ve yasli uyelerde takip ayari kapatilamaz.',
+    return this.prisma.$transaction(async (tx) => {
+      const lockedMemberships = await tx.$queryRaw<Array<{ id: string }>>(
+        Prisma.sql`
+          SELECT "id"
+          FROM "family_members"
+          WHERE "familyId" = ${familyId} AND "userId" = ${userId}
+          FOR UPDATE
+        `,
       );
-    }
 
-    return this.prisma.familyMember.update({
-      where: {
-        familyId_userId: {
-          familyId,
-          userId,
-        },
-      },
-      data: {
-        guardianTrackingEnabled: enabled,
-      },
+      if (lockedMemberships.length === 0) {
+        throw new NotFoundException('Bu aile grubunun uyesi degilsiniz.');
+      }
+
+      const membership = await tx.familyMember.findUnique({
+        where: { familyId_userId: { familyId, userId } },
+      });
+
+      if (!membership) {
+        throw new NotFoundException('Bu aile grubunun uyesi degilsiniz.');
+      }
+      if (membership.memberType !== MemberType.guardian) {
+        throw new ForbiddenException(
+          'Cocuk ve yasli uyelerde takip ayari kapatilamaz.',
+        );
+      }
+      if (membership.guardianTrackingEnabled === enabled) {
+        return membership;
+      }
+
+      const changedAt = new Date();
+      const updatedMembership = await tx.familyMember.update({
+        where: { familyId_userId: { familyId, userId } },
+        data: { guardianTrackingEnabled: enabled },
+      });
+
+      if (enabled) {
+        await tx.guardianTrackingInterval.create({
+          data: {
+            familyId,
+            guardianUserId: userId,
+            startedAt: changedAt,
+          },
+        });
+      } else {
+        await tx.guardianTrackingInterval.updateMany({
+          where: { familyId, guardianUserId: userId, endedAt: null },
+          data: { endedAt: changedAt },
+        });
+      }
+
+      return updatedMembership;
     });
   }
 }

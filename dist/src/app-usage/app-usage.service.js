@@ -11,11 +11,41 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AppUsageService = void 0;
 const common_1 = require("@nestjs/common");
+const client_1 = require("@prisma/client");
 const prisma_service_1 = require("../prisma/prisma.service");
+const tracking_data_authorization_1 = require("../common/tracking-data-authorization");
 let AppUsageService = class AppUsageService {
     prisma;
     constructor(prisma) {
         this.prisma = prisma;
+    }
+    isTrackableMember(member) {
+        return (member.memberType === client_1.MemberType.child ||
+            member.memberType === client_1.MemberType.elder ||
+            member.guardianTrackingEnabled);
+    }
+    getIstanbulDateKey(date = new Date()) {
+        const parts = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Europe/Istanbul',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+        }).formatToParts(date);
+        const get = (type) => parts.find((part) => part.type === type)?.value;
+        return `${get('year')}-${get('month')}-${get('day')}`;
+    }
+    getIstanbulDayStartUtc(dateStr) {
+        const dateKey = dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)
+            ? dateStr
+            : this.getIstanbulDateKey();
+        const [year, month, day] = dateKey.split('-').map(Number);
+        return new Date(Date.UTC(year, month - 1, day, -3, 0, 0, 0));
+    }
+    getNextIstanbulDayStartUtc(date) {
+        const [year, month, day] = this.getIstanbulDateKey(date)
+            .split('-')
+            .map(Number);
+        return new Date(Date.UTC(year, month - 1, day + 1, -3, 0, 0, 0));
     }
     async checkCommonFamily(userId, targetUserId) {
         const common = await this.prisma.familyMember.findFirst({
@@ -24,78 +54,79 @@ let AppUsageService = class AppUsageService {
                 family: {
                     members: {
                         some: {
-                            userId: userId,
+                            userId,
                         },
                     },
                 },
             },
         });
-        return !!common;
+        return !!common && this.isTrackableMember(common);
     }
     async saveAppUsage(userId, usages, recordedDateStr) {
-        const startOfToday = recordedDateStr ? new Date(recordedDateStr) : new Date();
-        startOfToday.setHours(0, 0, 0, 0);
-        const existingUsages = await this.prisma.appUsage.findMany({
-            where: {
-                userId,
-                recordedDate: startOfToday,
-            },
-        });
-        const existingMap = new Map(existingUsages.map((u) => [u.packageName, u]));
-        const toCreate = [];
-        const toUpdate = [];
-        for (const usage of usages) {
-            const existing = existingMap.get(usage.packageName);
-            if (existing) {
-                if (existing.durationMin !== usage.durationMin) {
-                    toUpdate.push({
-                        id: existing.id,
-                        durationMin: usage.durationMin,
-                        appName: usage.appName,
-                    });
-                }
-            }
-            else {
-                toCreate.push({
+        const recordedDate = this.getIstanbulDayStartUtc(recordedDateStr);
+        const now = new Date();
+        const normalizedUsages = usages
+            .map((usage) => ({
+            packageName: usage.packageName.trim(),
+            appName: usage.appName.trim(),
+            durationMin: usage.durationMin,
+        }))
+            .filter((usage) => usage.packageName.length > 0 &&
+            usage.appName.length > 0 &&
+            usage.durationMin > 0);
+        const packageNames = normalizedUsages.map((usage) => usage.packageName);
+        await this.prisma.$transaction([
+            this.prisma.appUsage.deleteMany({
+                where: {
+                    userId,
+                    recordedDate,
+                    ...(packageNames.length > 0
+                        ? { packageName: { notIn: packageNames } }
+                        : {}),
+                },
+            }),
+            ...normalizedUsages.map((usage) => this.prisma.appUsage.upsert({
+                where: {
+                    userId_packageName_recordedDate: {
+                        userId,
+                        packageName: usage.packageName,
+                        recordedDate,
+                    },
+                },
+                create: {
                     userId,
                     packageName: usage.packageName,
                     appName: usage.appName,
                     durationMin: usage.durationMin,
-                    recordedDate: startOfToday,
-                    lastUsedAt: new Date(),
-                });
-            }
-        }
-        if (toCreate.length > 0) {
-            await this.prisma.appUsage.createMany({
-                data: toCreate,
-            });
-        }
-        if (toUpdate.length > 0) {
-            await Promise.all(toUpdate.map((u) => this.prisma.appUsage.update({
-                where: { id: u.id },
-                data: {
-                    durationMin: u.durationMin,
-                    appName: u.appName,
-                    lastUsedAt: new Date(),
+                    recordedDate,
+                    lastUsedAt: now,
                 },
-            })));
-        }
-        return { success: true };
+                update: {
+                    appName: usage.appName,
+                    durationMin: usage.durationMin,
+                    lastUsedAt: now,
+                },
+            })),
+        ]);
+        return { success: true, count: normalizedUsages.length };
     }
     async getMemberAppUsage(userId, targetUserId) {
         if (userId !== targetUserId) {
             const isShared = await this.checkCommonFamily(userId, targetUserId);
+            const authorizedFrom = await (0, tracking_data_authorization_1.assertCanReadTrackingData)(this.prisma, userId, targetUserId, { includeTemporalBoundary: true });
             if (!isShared) {
                 throw new common_1.ForbiddenException('Bu üyenin uygulama kullanım verilerini görme yetkiniz yok.');
             }
+            if (!authorizedFrom ||
+                this.getIstanbulDayStartUtc() <
+                    this.getNextIstanbulDayStartUtc(authorizedFrom)) {
+                return [];
+            }
         }
-        const startOfToday = new Date();
-        startOfToday.setHours(0, 0, 0, 0);
         return this.prisma.appUsage.findMany({
             where: {
                 userId: targetUserId,
-                recordedDate: startOfToday,
+                recordedDate: this.getIstanbulDayStartUtc(),
             },
             orderBy: {
                 durationMin: 'desc',

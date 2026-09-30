@@ -25,9 +25,15 @@ let AdminController = class AdminController {
     constructor(adminService) {
         this.adminService = adminService;
     }
-    dashboard() { return this.adminService.dashboard(); }
-    users(query) { return this.adminService.users(query); }
-    user(id) { return this.adminService.user(id); }
+    dashboard() {
+        return this.adminService.dashboard();
+    }
+    users(query) {
+        return this.adminService.users(query);
+    }
+    user(id) {
+        return this.adminService.user(id);
+    }
     userHistory(adminId, userId, dateStr) {
         return this.adminService.userHistory(adminId, userId, dateStr);
     }
@@ -46,15 +52,21 @@ let AdminController = class AdminController {
     deleteAllTodayLocations(adminId) {
         return this.adminService.deleteAllTodayLocations(adminId);
     }
-    families(query) { return this.adminService.families(query); }
-    family(id) { return this.adminService.family(id); }
+    families(query) {
+        return this.adminService.families(query);
+    }
+    family(id) {
+        return this.adminService.family(id);
+    }
     latestLocations() {
         return this.adminService.latestLocations();
     }
     deleteFamily(adminId, id) {
         return this.adminService.deleteFamily(adminId, id);
     }
-    alerts(query) { return this.adminService.alerts(query); }
+    alerts(query) {
+        return this.adminService.alerts(query);
+    }
     resolveAlert(adminId, id) {
         return this.adminService.resolveAlert(adminId, id);
     }

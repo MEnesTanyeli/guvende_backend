@@ -18,7 +18,7 @@ export declare class MedicationsController {
         startDate: Date;
         repeatDays: number | null;
     }>;
-    getReminders(userId: string): Promise<{
+    getReminders(requesterId: string, targetUserId: string): Promise<{
         id: string;
         createdAt: Date;
         updatedAt: Date;

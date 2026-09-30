@@ -1,13 +1,17 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { Logger, ValidationPipe } from '@nestjs/common';
-import type { Express, NextFunction, Request, Response } from 'express';
-import type { CorsOptions } from '@nestjs/common/interfaces/external/cors-options.interface';
+import { Logger } from '@nestjs/common';
 
 import { AppLogger, errorLogger } from './common/logger';
+import { configureApp } from './common/configure-app';
 
 function assertProductionEnvironment(): void {
-  const required = ['DATABASE_URL', 'JWT_SECRET', 'BREVO_API_KEY'];
+  const required = [
+    'DATABASE_URL',
+    'JWT_SECRET',
+    'BREVO_API_KEY',
+    'OFFLINE_SOS_MASTER_KEY',
+  ];
   const missing = required.filter((key) => !process.env[key]);
   if (missing.length > 0) {
     throw new Error(`Eksik ortam degiskenleri: ${missing.join(', ')}`);
@@ -15,6 +19,16 @@ function assertProductionEnvironment(): void {
 
   if ((process.env.JWT_SECRET?.length ?? 0) < 32) {
     throw new Error('JWT_SECRET en az 32 karakter olmalidir.');
+  }
+  let offlineSosMasterKey = Buffer.alloc(0);
+  try {
+    offlineSosMasterKey = Buffer.from(
+      process.env.OFFLINE_SOS_MASTER_KEY || '',
+      'base64url',
+    );
+  } catch {}
+  if (offlineSosMasterKey.length !== 32) {
+    throw new Error('OFFLINE_SOS_MASTER_KEY 32 byte base64url olmalidir.');
   }
 }
 
@@ -24,56 +38,7 @@ async function bootstrap() {
     logger: new AppLogger(),
   });
   const logger = new Logger('Bootstrap');
-  const httpAdapter = app.getHttpAdapter().getInstance() as Express;
-
-  httpAdapter.disable('x-powered-by');
-  httpAdapter.set('trust proxy', 1);
-  app.use((_request: Request, response: Response, next: NextFunction) => {
-    response.setHeader('X-Content-Type-Options', 'nosniff');
-    response.setHeader('X-Frame-Options', 'DENY');
-    response.setHeader('Referrer-Policy', 'no-referrer');
-    response.setHeader(
-      'Permissions-Policy',
-      'camera=(), microphone=(), geolocation=()',
-    );
-    response.setHeader(
-      'Strict-Transport-Security',
-      'max-age=31536000; includeSubDomains',
-    );
-    response.setHeader('Cache-Control', 'no-store');
-    next();
-  });
-
-  const allowedOrigins = (process.env.CORS_ORIGINS || '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-
-  const corsOptions: CorsOptions = {
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-        return;
-      }
-      callback(new Error('CORS origin reddedildi'));
-    },
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Authorization', 'Content-Type'],
-    credentials: false,
-    maxAge: 86400,
-  };
-
-  app.enableCors(corsOptions);
-
-  // DTO validation desteği
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-      stopAtFirstError: true,
-    }),
-  );
+  configureApp(app);
 
   const port = process.env.PORT ?? 3000;
   await app.listen(port, '0.0.0.0');

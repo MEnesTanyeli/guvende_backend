@@ -18,30 +18,24 @@ const activity_service_1 = require("./activity.service");
 const jwt_auth_guard_1 = require("../auth/guards/jwt-auth.guard");
 const subscription_guard_1 = require("../auth/guards/subscription.guard");
 const get_user_decorator_1 = require("../auth/decorators/get-user.decorator");
+const get_daily_activity_query_dto_1 = require("./dto/get-daily-activity-query.dto");
 let ActivityController = class ActivityController {
     activityService;
     constructor(activityService) {
         this.activityService = activityService;
     }
-    async getDailyActivity(userId, memberId, date) {
-        const targetUserId = memberId || userId;
-        if (memberId && memberId !== userId) {
-            const hasAccess = await this.activityService.checkCommonFamily(userId, memberId);
-            if (!hasAccess) {
-                throw new common_1.ForbiddenException('Bu kullanıcının aktivite bilgilerini görmeye yetkiniz yok.');
-            }
-        }
-        return this.activityService.getDailyActivity(targetUserId, date);
+    async getDailyActivity(userId, query) {
+        const targetUserId = query.memberId || userId;
+        return this.activityService.getDailyActivity(userId, targetUserId, query.date);
     }
 };
 exports.ActivityController = ActivityController;
 __decorate([
     (0, common_1.Get)('daily'),
     __param(0, (0, get_user_decorator_1.GetUser)('id')),
-    __param(1, (0, common_1.Query)('memberId')),
-    __param(2, (0, common_1.Query)('date')),
+    __param(1, (0, common_1.Query)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String, String]),
+    __metadata("design:paramtypes", [String, get_daily_activity_query_dto_1.GetDailyActivityQueryDto]),
     __metadata("design:returntype", Promise)
 ], ActivityController.prototype, "getDailyActivity", null);
 exports.ActivityController = ActivityController = __decorate([

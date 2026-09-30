@@ -10,11 +10,14 @@ exports.UsersModule = void 0;
 const common_1 = require("@nestjs/common");
 const users_service_1 = require("./users.service");
 const users_controller_1 = require("./users.controller");
+const locations_module_1 = require("../locations/locations.module");
+const offline_sos_module_1 = require("../offline-sos/offline-sos.module");
 let UsersModule = class UsersModule {
 };
 exports.UsersModule = UsersModule;
 exports.UsersModule = UsersModule = __decorate([
     (0, common_1.Module)({
+        imports: [(0, common_1.forwardRef)(() => locations_module_1.LocationsModule), offline_sos_module_1.OfflineSosModule],
         providers: [users_service_1.UsersService],
         controllers: [users_controller_1.UsersController],
         exports: [users_service_1.UsersService],

@@ -2,6 +2,7 @@ import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/session.dto';
+import type { AuthenticatedUser } from './types/authenticated-user';
 declare class ForgotPasswordDto {
     email: string;
 }
@@ -9,6 +10,9 @@ declare class ResetPasswordDto {
     email: string;
     code: string;
     newPassword: string;
+}
+declare class ConfirmChildElderLogoutDto {
+    code: string;
 }
 export declare class AuthController {
     private authService;
@@ -117,10 +121,20 @@ export declare class AuthController {
         accessTokenExpiresIn: number;
         refreshTokenExpiresAt: Date;
     }>;
-    logout(user: any): Promise<{
+    logout(user: AuthenticatedUser): Promise<{
         message: string;
     }>;
-    logoutAll(user: any): Promise<{
+    requestChildElderLogoutApproval(user: AuthenticatedUser): Promise<{
+        success: boolean;
+        codeSent: boolean;
+        message: string;
+        expiresAt: Date;
+        remainingSeconds: number;
+    }>;
+    confirmChildElderLogout(user: AuthenticatedUser, dto: ConfirmChildElderLogoutDto): Promise<{
+        message: string;
+    }>;
+    logoutAll(user: AuthenticatedUser): Promise<{
         message: string;
     }>;
     forgotPassword(dto: ForgotPasswordDto): Promise<{
@@ -137,6 +151,6 @@ export declare class AuthController {
     resetPassword(dto: ResetPasswordDto): Promise<{
         message: string;
     }>;
-    getMe(user: any): Promise<any>;
+    getMe(user: AuthenticatedUser): AuthenticatedUser;
 }
 export {};

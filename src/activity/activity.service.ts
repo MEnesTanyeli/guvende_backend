@@ -1,21 +1,10 @@
-import { Injectable } from '@nestjs/common';
-import { MemberType } from '@prisma/client';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { assertCanReadTrackingData } from '../common/tracking-data-authorization';
 
 @Injectable()
 export class ActivityService {
   constructor(private prisma: PrismaService) {}
-
-  private isTrackableMember(member: {
-    memberType: MemberType;
-    guardianTrackingEnabled: boolean;
-  }): boolean {
-    return (
-      member.memberType === MemberType.child ||
-      member.memberType === MemberType.elder ||
-      member.guardianTrackingEnabled
-    );
-  }
 
   // İki koordinat arası Haversine mesafe hesabı (metre cinsinden)
   private getDistanceInMeters(
@@ -37,7 +26,26 @@ export class ActivityService {
     return R * c;
   }
 
-  async getDailyActivity(userId: string, dateStr?: string) {
+  async getDailyActivity(
+    requesterId: string,
+    targetUserId: string,
+    dateStr?: string,
+  ) {
+    const authorizedFrom = await assertCanReadTrackingData(
+      this.prisma,
+      requesterId,
+      targetUserId,
+      { includeTemporalBoundary: true },
+    );
+
+    return this.calculateDailyActivity(targetUserId, dateStr, authorizedFrom);
+  }
+
+  private async calculateDailyActivity(
+    userId: string,
+    dateStr?: string,
+    authorizedFrom?: Date,
+  ) {
     const targetDate = dateStr ? new Date(dateStr) : new Date();
 
     // Günün başlangıç ve bitiş saatleri
@@ -47,15 +55,29 @@ export class ActivityService {
     const endOfDay = new Date(targetDate);
     endOfDay.setHours(23, 59, 59, 999);
 
+    if (authorizedFrom && authorizedFrom > endOfDay) {
+      throw new ForbiddenException(
+        'Bu tarihteki aktivite verilerine erisim yetkiniz yok.',
+      );
+    }
+
+    const effectiveStart =
+      authorizedFrom && authorizedFrom > startOfDay
+        ? authorizedFrom
+        : startOfDay;
+    const isPartiallyAuthorizedDay = effectiveStart > startOfDay;
+
     // Kayıtlı bir snapshot var mı?
-    const existingSnapshot = await this.prisma.activitySnapshot.findUnique({
-      where: {
-        userId_date: {
-          userId,
-          date: startOfDay,
-        },
-      },
-    });
+    const existingSnapshot = isPartiallyAuthorizedDay
+      ? null
+      : await this.prisma.activitySnapshot.findUnique({
+          where: {
+            userId_date: {
+              userId,
+              date: startOfDay,
+            },
+          },
+        });
 
     if (existingSnapshot) {
       return existingSnapshot;
@@ -66,7 +88,7 @@ export class ActivityService {
       where: {
         userId,
         recordedAt: {
-          gte: startOfDay,
+          gte: effectiveStart,
           lte: endOfDay,
         },
       },
@@ -99,7 +121,7 @@ export class ActivityService {
       where: {
         userId,
         createdAt: {
-          gte: startOfDay,
+          gte: effectiveStart,
           lte: endOfDay,
         },
         type: {
@@ -130,7 +152,7 @@ export class ActivityService {
       visitedPlacesCount,
     };
 
-    if (!isToday && locations.length > 0) {
+    if (!isToday && locations.length > 0 && !isPartiallyAuthorizedDay) {
       return this.prisma.activitySnapshot.create({
         data: snapshotData,
       });
@@ -142,24 +164,5 @@ export class ActivityService {
       ...snapshotData,
       createdAt: new Date(),
     };
-  }
-
-  async checkCommonFamily(
-    userId: string,
-    targetUserId: string,
-  ): Promise<boolean> {
-    const common = await this.prisma.familyMember.findFirst({
-      where: {
-        userId: targetUserId,
-        family: {
-          members: {
-            some: {
-              userId: userId,
-            },
-          },
-        },
-      },
-    });
-    return !!common && this.isTrackableMember(common);
   }
 }

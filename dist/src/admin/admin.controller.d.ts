@@ -74,23 +74,25 @@ export declare class AdminController {
         } & {
             id: string;
             createdAt: Date;
-            familyId: string;
             userId: string;
+            familyId: string;
             memberType: import(".prisma/client").$Enums.MemberType;
             permissions: string[];
             muteNotifications: boolean;
+            guardianTrackingEnabled: boolean;
         })[];
         alerts: {
             id: string;
             createdAt: Date;
-            message: string;
-            familyId: string;
-            userId: string;
             type: import(".prisma/client").$Enums.AlertType;
-            title: string;
+            message: string;
+            userId: string;
+            familyId: string;
             status: import(".prisma/client").$Enums.AlertStatus;
+            title: string;
             metadata: import("@prisma/client/runtime/library").JsonValue | null;
             resolvedAt: Date | null;
+            audibleWarningId: string | null;
         }[];
     }>;
     userHistory(adminId: string, userId: string, dateStr?: string): Promise<{
@@ -143,6 +145,7 @@ export declare class AdminController {
             createdAt: Date;
             updatedAt: Date;
             inviteCode: string | null;
+            sosEncryptionKey: string | null;
             type: string;
             ownerId: string;
         })[];
@@ -155,14 +158,15 @@ export declare class AdminController {
         alerts: {
             id: string;
             createdAt: Date;
-            message: string;
-            familyId: string;
-            userId: string;
             type: import(".prisma/client").$Enums.AlertType;
-            title: string;
+            message: string;
+            userId: string;
+            familyId: string;
             status: import(".prisma/client").$Enums.AlertStatus;
+            title: string;
             metadata: import("@prisma/client/runtime/library").JsonValue | null;
             resolvedAt: Date | null;
+            audibleWarningId: string | null;
         }[];
         owner: {
             id: string;
@@ -181,19 +185,20 @@ export declare class AdminController {
         } & {
             id: string;
             createdAt: Date;
-            familyId: string;
             userId: string;
+            familyId: string;
             memberType: import(".prisma/client").$Enums.MemberType;
             permissions: string[];
             muteNotifications: boolean;
+            guardianTrackingEnabled: boolean;
         })[];
         safeZones: {
             id: string;
             name: string;
             createdAt: Date;
-            familyId: string;
             latitude: number;
             longitude: number;
+            familyId: string;
             radius: number;
             createdBy: string;
         }[];
@@ -203,6 +208,7 @@ export declare class AdminController {
         createdAt: Date;
         updatedAt: Date;
         inviteCode: string | null;
+        sosEncryptionKey: string | null;
         type: string;
         ownerId: string;
     }>;
@@ -223,7 +229,13 @@ export declare class AdminController {
         batteryLevel: number | null;
         isCharging: boolean | null;
         connectionStatus: string;
+        movementStatus: string;
         recordedAt: Date;
+        receivedAt: Date;
+        devicePointId: string | null;
+        filterVersion: string;
+        deliveryMode: string;
+        deferredReason: string | null;
     }) | null)[]>;
     deleteFamily(adminId: string, id: string): Promise<{
         success: boolean;
@@ -242,14 +254,15 @@ export declare class AdminController {
         } & {
             id: string;
             createdAt: Date;
-            message: string;
-            familyId: string;
-            userId: string;
             type: import(".prisma/client").$Enums.AlertType;
-            title: string;
+            message: string;
+            userId: string;
+            familyId: string;
             status: import(".prisma/client").$Enums.AlertStatus;
+            title: string;
             metadata: import("@prisma/client/runtime/library").JsonValue | null;
             resolvedAt: Date | null;
+            audibleWarningId: string | null;
         })[];
         total: number;
         page: number;
@@ -259,14 +272,15 @@ export declare class AdminController {
     resolveAlert(adminId: string, id: string): Promise<{
         id: string;
         createdAt: Date;
-        message: string;
-        familyId: string;
-        userId: string;
         type: import(".prisma/client").$Enums.AlertType;
-        title: string;
+        message: string;
+        userId: string;
+        familyId: string;
         status: import(".prisma/client").$Enums.AlertStatus;
+        title: string;
         metadata: import("@prisma/client/runtime/library").JsonValue | null;
         resolvedAt: Date | null;
+        audibleWarningId: string | null;
     }>;
     auditLogs(query: AdminQueryDto): Promise<{
         items: ({

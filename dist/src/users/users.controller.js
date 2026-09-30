@@ -13,11 +13,22 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.UsersController = void 0;
+const throttler_1 = require("@nestjs/throttler");
 const common_1 = require("@nestjs/common");
 const users_service_1 = require("./users.service");
 const jwt_auth_guard_1 = require("../auth/guards/jwt-auth.guard");
 const get_user_decorator_1 = require("../auth/decorators/get-user.decorator");
 const class_validator_1 = require("class-validator");
+const set_proxy_dto_1 = require("./dto/set-proxy.dto");
+const update_device_permissions_dto_1 = require("./dto/update-device-permissions.dto");
+class DeleteAccountDto {
+    password;
+}
+__decorate([
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsNotEmpty)(),
+    __metadata("design:type", String)
+], DeleteAccountDto.prototype, "password", void 0);
 class UpdateProfileDto {
     name;
     phone;
@@ -43,14 +54,20 @@ let UsersController = class UsersController {
     constructor(usersService) {
         this.usersService = usersService;
     }
+    deletionInfo(userId) {
+        return this.usersService.accountDeletionInfo(userId);
+    }
+    deleteAccount(userId, dto) {
+        return this.usersService.deleteAccount(userId, dto.password);
+    }
     async getProfile(userId) {
         return this.usersService.findOne(userId);
     }
     async updateProfile(userId, dto) {
         return this.usersService.updateProfile(userId, dto.name, dto.phone, dto.gender);
     }
-    async setProxy(userId, body) {
-        return this.usersService.setProxy(userId, body.email);
+    async setProxy(userId, dto) {
+        return this.usersService.setProxy(userId, dto.email);
     }
     async removeProxyPatch(userId) {
         return this.usersService.removeProxy(userId);
@@ -62,10 +79,26 @@ let UsersController = class UsersController {
         return this.usersService.resetDevice(guardianId, childId);
     }
     async updateDevicePermissions(userId, dto) {
-        return this.usersService.updateDevicePermissions(userId, dto);
+        return this.usersService.updateDevicePermissions(userId, dto.permissions);
     }
 };
 exports.UsersController = UsersController;
+__decorate([
+    (0, common_1.Get)('account/deletion-info'),
+    __param(0, (0, get_user_decorator_1.GetUser)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], UsersController.prototype, "deletionInfo", null);
+__decorate([
+    (0, throttler_1.Throttle)({ default: { limit: 5, ttl: 60_000 } }),
+    (0, common_1.Delete)('account'),
+    __param(0, (0, get_user_decorator_1.GetUser)('id')),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, DeleteAccountDto]),
+    __metadata("design:returntype", void 0)
+], UsersController.prototype, "deleteAccount", null);
 __decorate([
     (0, common_1.Get)('profile'),
     __param(0, (0, get_user_decorator_1.GetUser)('id')),
@@ -86,7 +119,7 @@ __decorate([
     __param(0, (0, get_user_decorator_1.GetUser)('id')),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:paramtypes", [String, set_proxy_dto_1.SetProxyDto]),
     __metadata("design:returntype", Promise)
 ], UsersController.prototype, "setProxy", null);
 __decorate([
@@ -116,7 +149,7 @@ __decorate([
     __param(0, (0, get_user_decorator_1.GetUser)('id')),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:paramtypes", [String, update_device_permissions_dto_1.UpdateDevicePermissionsDto]),
     __metadata("design:returntype", Promise)
 ], UsersController.prototype, "updateDevicePermissions", null);
 exports.UsersController = UsersController = __decorate([

@@ -12,6 +12,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ActivityService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
+const tracking_data_authorization_1 = require("../common/tracking-data-authorization");
 let ActivityService = class ActivityService {
     prisma;
     constructor(prisma) {
@@ -29,20 +30,33 @@ let ActivityService = class ActivityService {
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         return R * c;
     }
-    async getDailyActivity(userId, dateStr) {
+    async getDailyActivity(requesterId, targetUserId, dateStr) {
+        const authorizedFrom = await (0, tracking_data_authorization_1.assertCanReadTrackingData)(this.prisma, requesterId, targetUserId, { includeTemporalBoundary: true });
+        return this.calculateDailyActivity(targetUserId, dateStr, authorizedFrom);
+    }
+    async calculateDailyActivity(userId, dateStr, authorizedFrom) {
         const targetDate = dateStr ? new Date(dateStr) : new Date();
         const startOfDay = new Date(targetDate);
         startOfDay.setHours(0, 0, 0, 0);
         const endOfDay = new Date(targetDate);
         endOfDay.setHours(23, 59, 59, 999);
-        const existingSnapshot = await this.prisma.activitySnapshot.findUnique({
-            where: {
-                userId_date: {
-                    userId,
-                    date: startOfDay,
+        if (authorizedFrom && authorizedFrom > endOfDay) {
+            throw new common_1.ForbiddenException('Bu tarihteki aktivite verilerine erisim yetkiniz yok.');
+        }
+        const effectiveStart = authorizedFrom && authorizedFrom > startOfDay
+            ? authorizedFrom
+            : startOfDay;
+        const isPartiallyAuthorizedDay = effectiveStart > startOfDay;
+        const existingSnapshot = isPartiallyAuthorizedDay
+            ? null
+            : await this.prisma.activitySnapshot.findUnique({
+                where: {
+                    userId_date: {
+                        userId,
+                        date: startOfDay,
+                    },
                 },
-            },
-        });
+            });
         if (existingSnapshot) {
             return existingSnapshot;
         }
@@ -50,7 +64,7 @@ let ActivityService = class ActivityService {
             where: {
                 userId,
                 recordedAt: {
-                    gte: startOfDay,
+                    gte: effectiveStart,
                     lte: endOfDay,
                 },
             },
@@ -59,7 +73,8 @@ let ActivityService = class ActivityService {
         let totalDistance = 0;
         for (let i = 0; i < locations.length - 1; i++) {
             const dist = this.getDistanceInMeters(locations[i].latitude, locations[i].longitude, locations[i + 1].latitude, locations[i + 1].longitude);
-            if (dist > 5) {
+            if (locations[i + 1].movementStatus === 'moving' ||
+                (locations[i + 1].movementStatus === 'unknown' && dist >= 15)) {
                 totalDistance += dist;
             }
         }
@@ -68,7 +83,7 @@ let ActivityService = class ActivityService {
             where: {
                 userId,
                 createdAt: {
-                    gte: startOfDay,
+                    gte: effectiveStart,
                     lte: endOfDay,
                 },
                 type: {
@@ -76,7 +91,12 @@ let ActivityService = class ActivityService {
                 },
             },
         });
-        const uniqueVisitedZones = new Set(visitedZones.map((z) => z.metadata?.safeZoneId).filter(Boolean));
+        const uniqueVisitedZones = new Set(visitedZones
+            .map((z) => {
+            const metadata = z.metadata;
+            return metadata?.safeZoneId;
+        })
+            .filter(Boolean));
         const visitedPlacesCount = Math.max(1, uniqueVisitedZones.size + 1);
         const isToday = new Date().toDateString() === targetDate.toDateString();
         const snapshotData = {
@@ -86,7 +106,7 @@ let ActivityService = class ActivityService {
             activeMinutes,
             visitedPlacesCount,
         };
-        if (!isToday && locations.length > 0) {
+        if (!isToday && locations.length > 0 && !isPartiallyAuthorizedDay) {
             return this.prisma.activitySnapshot.create({
                 data: snapshotData,
             });
@@ -96,21 +116,6 @@ let ActivityService = class ActivityService {
             ...snapshotData,
             createdAt: new Date(),
         };
-    }
-    async checkCommonFamily(userId, targetUserId) {
-        const common = await this.prisma.familyMember.findFirst({
-            where: {
-                userId: targetUserId,
-                family: {
-                    members: {
-                        some: {
-                            userId: userId,
-                        },
-                    },
-                },
-            },
-        });
-        return !!common;
     }
 };
 exports.ActivityService = ActivityService;

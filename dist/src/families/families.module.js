@@ -11,13 +11,16 @@ const common_1 = require("@nestjs/common");
 const families_service_1 = require("./families.service");
 const families_controller_1 = require("./families.controller");
 const notifications_module_1 = require("../notifications/notifications.module");
+const locations_module_1 = require("../locations/locations.module");
+const offline_sos_module_1 = require("../offline-sos/offline-sos.module");
+const join_user_throttle_guard_1 = require("./guards/join-user-throttle.guard");
 let FamiliesModule = class FamiliesModule {
 };
 exports.FamiliesModule = FamiliesModule;
 exports.FamiliesModule = FamiliesModule = __decorate([
     (0, common_1.Module)({
-        imports: [notifications_module_1.NotificationsModule],
-        providers: [families_service_1.FamiliesService],
+        imports: [notifications_module_1.NotificationsModule, locations_module_1.LocationsModule, offline_sos_module_1.OfflineSosModule],
+        providers: [families_service_1.FamiliesService, join_user_throttle_guard_1.JoinUserThrottleGuard],
         controllers: [families_controller_1.FamiliesController],
         exports: [families_service_1.FamiliesService],
     })

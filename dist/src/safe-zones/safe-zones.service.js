@@ -13,12 +13,16 @@ exports.SafeZonesService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
 const client_1 = require("@prisma/client");
+const subscription_entitlement_service_1 = require("../common/subscription-entitlement.service");
 let SafeZonesService = class SafeZonesService {
     prisma;
-    constructor(prisma) {
+    subscriptionEntitlement;
+    constructor(prisma, subscriptionEntitlement) {
         this.prisma = prisma;
+        this.subscriptionEntitlement = subscriptionEntitlement;
     }
     async create(userId, familyId, dto) {
+        await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
         const membership = await this.prisma.familyMember.findUnique({
             where: {
                 familyId_userId: {
@@ -45,6 +49,7 @@ let SafeZonesService = class SafeZonesService {
         });
     }
     async findAll(userId, familyId) {
+        await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
         const membership = await this.prisma.familyMember.findUnique({
             where: {
                 familyId_userId: {
@@ -55,6 +60,9 @@ let SafeZonesService = class SafeZonesService {
         });
         if (!membership) {
             throw new common_1.ForbiddenException('Bu aile grubuna erişim yetkiniz yok.');
+        }
+        if (membership.memberType !== client_1.MemberType.guardian) {
+            throw new common_1.ForbiddenException('Guvenli bolgeleri sadece koruyucu (guardian) uyeler goruntuleyebilir.');
         }
         return this.prisma.safeZone.findMany({
             where: {
@@ -72,6 +80,7 @@ let SafeZonesService = class SafeZonesService {
         if (!safeZone) {
             throw new common_1.NotFoundException('Güvenli bölge bulunamadı.');
         }
+        await this.subscriptionEntitlement.assertFamilyEntitled(safeZone.familyId);
         const membership = await this.prisma.familyMember.findUnique({
             where: {
                 familyId_userId: {
@@ -92,6 +101,7 @@ let SafeZonesService = class SafeZonesService {
 exports.SafeZonesService = SafeZonesService;
 exports.SafeZonesService = SafeZonesService = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        subscription_entitlement_service_1.SubscriptionEntitlementService])
 ], SafeZonesService);
 //# sourceMappingURL=safe-zones.service.js.map

@@ -12,15 +12,16 @@ const locations_service_1 = require("./locations.service");
 const locations_controller_1 = require("./locations.controller");
 const locations_gateway_1 = require("./locations.gateway");
 const auth_module_1 = require("../auth/auth.module");
+const location_rate_limit_service_1 = require("./location-rate-limit.service");
 let LocationsModule = class LocationsModule {
 };
 exports.LocationsModule = LocationsModule;
 exports.LocationsModule = LocationsModule = __decorate([
     (0, common_1.Module)({
-        imports: [auth_module_1.AuthModule],
-        providers: [locations_service_1.LocationsService, locations_gateway_1.LocationsGateway],
+        imports: [(0, common_1.forwardRef)(() => auth_module_1.AuthModule)],
+        providers: [locations_service_1.LocationsService, locations_gateway_1.LocationsGateway, location_rate_limit_service_1.LocationRateLimitService],
         controllers: [locations_controller_1.LocationsController],
-        exports: [locations_service_1.LocationsService, locations_gateway_1.LocationsGateway],
+        exports: [locations_service_1.LocationsService, locations_gateway_1.LocationsGateway, location_rate_limit_service_1.LocationRateLimitService],
     })
 ], LocationsModule);
 //# sourceMappingURL=locations.module.js.map

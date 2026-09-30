@@ -1,14 +1,7 @@
-import { IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
-import { MemberType } from '@prisma/client';
+import { IsNotEmpty, IsString } from 'class-validator';
 
 export class JoinFamilyDto {
   @IsString()
-  @IsNotEmpty({ message: 'Aile kodu / kimliği boş bırakılamaz.' })
-  familyId: string;
-
-  @IsEnum(MemberType, {
-    message: 'Geçersiz üye tipi (guardian, child, elder).',
-  })
-  @IsOptional()
-  memberType?: MemberType;
+  @IsNotEmpty({ message: 'Aile davet kodu boş bırakılamaz.' })
+  inviteCode: string;
 }

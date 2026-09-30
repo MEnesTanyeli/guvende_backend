@@ -1,15 +1,18 @@
 import { JwtService } from '@nestjs/jwt';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { UsersService } from '../users/users.service';
 import { MailService } from '../mail/mail.service';
+import { LocationsGateway } from '../locations/locations.gateway';
 export declare class AuthService {
     private prisma;
     private jwtService;
     private usersService;
     private mailService;
-    constructor(prisma: PrismaService, jwtService: JwtService, usersService: UsersService, mailService: MailService);
+    private locationsGateway;
+    constructor(prisma: PrismaService, jwtService: JwtService, usersService: UsersService, mailService: MailService, locationsGateway: LocationsGateway);
     sendVerificationCode(email: string): Promise<{
         success: boolean;
         codeSent: boolean;
@@ -37,7 +40,7 @@ export declare class AuthService {
                 name: string;
             } | null;
             isLocked: boolean;
-            devicePermissions: import("@prisma/client/runtime/library").JsonValue;
+            devicePermissions: Prisma.JsonValue;
             createdAt: Date;
         };
         token: string;
@@ -67,7 +70,7 @@ export declare class AuthService {
                 name: string;
             } | null;
             isLocked: boolean;
-            devicePermissions: import("@prisma/client/runtime/library").JsonValue;
+            devicePermissions: Prisma.JsonValue;
             createdAt: Date;
         };
         token: string;
@@ -97,7 +100,7 @@ export declare class AuthService {
                 name: string;
             } | null;
             isLocked: boolean;
-            devicePermissions: import("@prisma/client/runtime/library").JsonValue;
+            devicePermissions: Prisma.JsonValue;
             createdAt: Date;
         };
         token: string;
@@ -109,6 +112,7 @@ export declare class AuthService {
     }>;
     private generateAccessToken;
     private createSession;
+    private createSessionInTransaction;
     refresh(refreshToken: string): Promise<{
         token: string;
         accessToken: string;
@@ -119,11 +123,24 @@ export declare class AuthService {
     logout(sessionId: string): Promise<{
         message: string;
     }>;
+    requestChildElderLogoutApproval(userId: string, sessionId: string): Promise<{
+        success: boolean;
+        codeSent: boolean;
+        message: string;
+        expiresAt: Date;
+        remainingSeconds: number;
+    }>;
+    confirmChildElderLogout(userId: string, sessionId: string, code: string): Promise<{
+        message: string;
+    }>;
     logoutAll(userId: string): Promise<{
         message: string;
     }>;
     private revokeAllSessions;
+    private loadCanonicalLogoutSubject;
     private handleRefreshTokenReuse;
+    private withUserSessionSecurityLock;
+    private withRegistrationOtpLock;
     private hashRefreshToken;
     forgotPassword(email: string): Promise<{
         message: string;

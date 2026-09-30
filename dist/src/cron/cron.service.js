@@ -26,6 +26,9 @@ let CronService = class CronService {
         this.notificationsService = notificationsService;
         this.locationsGateway = locationsGateway;
     }
+    getErrorMessage(error) {
+        return error instanceof Error ? error.message : String(error);
+    }
     getDistanceInMeters(lat1, lon1, lat2, lon2) {
         const R = 6371000;
         const dLat = (lat2 - lat1) * (Math.PI / 180);
@@ -38,10 +41,52 @@ let CronService = class CronService {
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         return R * c;
     }
+    getIstanbulHour(date = new Date()) {
+        const hour = new Intl.DateTimeFormat('en-US', {
+            timeZone: 'Europe/Istanbul',
+            hour: '2-digit',
+            hour12: false,
+        }).format(date);
+        return Number(hour);
+    }
+    isInInactivityQuietHours(date = new Date()) {
+        const hour = this.getIstanbulHour(date);
+        return hour >= 0 && hour < 8;
+    }
+    async getInactivityAlertFamilyIds(familyIds, latitude, longitude) {
+        const eligibleFamilyIds = [];
+        for (const familyId of familyIds) {
+            const safeZones = await this.prisma.safeZone.findMany({
+                where: { familyId },
+                select: {
+                    latitude: true,
+                    longitude: true,
+                    radius: true,
+                },
+            });
+            const isInsideSafeZone = safeZones.some((zone) => {
+                const distance = this.getDistanceInMeters(latitude, longitude, zone.latitude, zone.longitude);
+                return distance <= zone.radius;
+            });
+            if (!isInsideSafeZone) {
+                eligibleFamilyIds.push(familyId);
+            }
+        }
+        return eligibleFamilyIds;
+    }
     async handleConnectionLostCheck() {
         this.logger.log('Bağlantı kesildi kontrolü zamanlanmış görevi başlatılıyor...');
-        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+        const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
         const activeMembers = await this.prisma.familyMember.findMany({
+            where: {
+                OR: [
+                    { memberType: { in: [client_1.MemberType.child, client_1.MemberType.elder] } },
+                    {
+                        memberType: client_1.MemberType.guardian,
+                        guardianTrackingEnabled: true,
+                    },
+                ],
+            },
             select: { userId: true, familyId: true },
         });
         const userFamiliesMap = new Map();
@@ -63,7 +108,7 @@ let CronService = class CronService {
                 select: { name: true },
             });
             const userName = user ? user.name : 'Bilinmeyen Üye';
-            if (lastLocation && lastLocation.recordedAt < tenMinutesAgo) {
+            if (lastLocation && lastLocation.recordedAt < fifteenMinutesAgo) {
                 if (lastLocation.connectionStatus !== 'offline') {
                     await this.prisma.location.update({
                         where: { id: lastLocation.id },
@@ -71,32 +116,22 @@ let CronService = class CronService {
                     });
                     this.logger.log(`Kullanıcı (${userName} - ${userId}) cihazı uzun süredir konum göndermediği için çevrimdışı durumuna güncellendi.`);
                 }
-                const activeAlert = await this.prisma.alert.findFirst({
-                    where: {
-                        userId,
-                        type: client_1.AlertType.connection_lost,
-                        status: client_1.AlertStatus.active,
+                const alertTitle = 'Baglanti Kesildi';
+                const alertMsg = `${userName} isimli uyenin cihazindan 15 dakikadir konum alinamiyor! Baglanti kesilmis olabilir.`;
+                const alerts = await this.notificationsService.raiseUserAlertForFamilies({
+                    familyIds,
+                    userId,
+                    type: client_1.AlertType.connection_lost,
+                    title: alertTitle,
+                    message: alertMsg,
+                    metadata: {
+                        lastRecordedAt: lastLocation ? lastLocation.recordedAt : null,
                     },
+                    notificationData: { type: 'connection_lost', userId },
+                    dedupeActiveByUser: true,
                 });
-                if (!activeAlert) {
-                    const alertTitle = 'Bağlantı Kesildi';
-                    const alertMsg = `${userName} isimli üyenin cihazından 10 dakikadır konum alınamıyor! Bağlantı kesilmiş olabilir.`;
-                    for (const familyId of familyIds) {
-                        await this.prisma.alert.create({
-                            data: {
-                                familyId,
-                                userId,
-                                type: client_1.AlertType.connection_lost,
-                                title: alertTitle,
-                                message: alertMsg,
-                                metadata: {
-                                    lastRecordedAt: lastLocation ? lastLocation.recordedAt : null,
-                                },
-                            },
-                        });
-                        await this.notificationsService.sendFamilyNotification(familyId, userId, alertTitle, alertMsg, { type: 'connection_lost', userId });
-                    }
-                    this.logger.warn(`${userName} (${userId}) için bağlantı koptu alarmı oluşturuldu.`);
+                if (alerts.length > 0) {
+                    this.logger.warn(`${userName} (${userId}) icin baglanti koptu alarmi olusturuldu.`);
                 }
             }
         }
@@ -104,9 +139,22 @@ let CronService = class CronService {
     }
     async handleInactivityCheck() {
         this.logger.log('Hareketsizlik kontrolü zamanlanmış görevi başlatılıyor...');
+        if (this.isInInactivityQuietHours()) {
+            this.logger.log('Hareketsizlik kontrolu sessiz saatlerde oldugu icin bildirim uretilmedi.');
+            return;
+        }
         const eightHoursAgo = new Date(Date.now() - 8 * 60 * 60 * 1000);
         const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
         const activeMembers = await this.prisma.familyMember.findMany({
+            where: {
+                OR: [
+                    { memberType: { in: [client_1.MemberType.child, client_1.MemberType.elder] } },
+                    {
+                        memberType: client_1.MemberType.guardian,
+                        guardianTrackingEnabled: true,
+                    },
+                ],
+            },
             select: { userId: true, familyId: true },
         });
         const userFamiliesMap = new Map();
@@ -142,30 +190,29 @@ let CronService = class CronService {
                         select: { name: true },
                     });
                     const userName = user ? user.name : 'Bilinmeyen Üye';
-                    const activeAlert = await this.prisma.alert.findFirst({
-                        where: {
-                            userId,
-                            type: client_1.AlertType.inactivity,
-                            status: client_1.AlertStatus.active,
+                    const alertTitle = 'Hareketsizlik Uyarisi';
+                    const alertMsg = `${userName} son 8 saattir ayni bolgede hareketsiz kalmistir. Bir durum degisikligi olabilir.`;
+                    const alertFamilyIds = await this.getInactivityAlertFamilyIds(familyIds, latestLoc.latitude, latestLoc.longitude);
+                    if (alertFamilyIds.length === 0) {
+                        this.logger.log(`${userName} (${userId}) guvenli bolgede oldugu icin hareketsizlik bildirimi uretilmedi.`);
+                        continue;
+                    }
+                    const alerts = await this.notificationsService.raiseUserAlertForFamilies({
+                        familyIds: alertFamilyIds,
+                        userId,
+                        type: client_1.AlertType.inactivity,
+                        title: alertTitle,
+                        message: alertMsg,
+                        metadata: {
+                            radius: 20,
+                            hours: 8,
+                            skippedSafeZones: familyIds.length - alertFamilyIds.length,
                         },
+                        notificationData: { type: 'inactivity', userId },
+                        dedupeActiveByUser: true,
                     });
-                    if (!activeAlert) {
-                        const alertTitle = 'Hareketsizlik Uyarısı';
-                        const alertMsg = `${userName} son 8 saattir aynı bölgede hareketsiz kalmıştır. Bir durum değişikliği olabilir.`;
-                        for (const familyId of familyIds) {
-                            await this.prisma.alert.create({
-                                data: {
-                                    familyId,
-                                    userId,
-                                    type: client_1.AlertType.inactivity,
-                                    title: alertTitle,
-                                    message: alertMsg,
-                                    metadata: { radius: 20, hours: 8 },
-                                },
-                            });
-                            await this.notificationsService.sendFamilyNotification(familyId, userId, alertTitle, alertMsg, { type: 'inactivity', userId });
-                        }
-                        this.logger.warn(`${userName} (${userId}) için hareketsizlik alarmı oluşturuldu.`);
+                    if (alerts.length > 0) {
+                        this.logger.warn(`${userName} (${userId}) icin hareketsizlik alarmi olusturuldu.`);
                     }
                 }
             }
@@ -189,8 +236,9 @@ let CronService = class CronService {
             },
         });
         const filteredReminders = activeReminders.filter((reminder) => {
-            const permissions = reminder.user.devicePermissions;
-            const userTimezone = permissions?.timezone || 'Europe/Istanbul';
+            const permissions = reminder.user
+                .devicePermissions;
+            const userTimezone = permissions?.timezone ?? 'Europe/Istanbul';
             const userLocalTime = new Date().toLocaleTimeString('tr-TR', {
                 hour12: false,
                 hour: '2-digit',
@@ -242,9 +290,17 @@ let CronService = class CronService {
     }
     async handleSilentPingCheck() {
         this.logger.log('Sessiz konum pingi zamanlanmış görevi başlatılıyor...');
-        const sevenMinutesAgo = new Date(Date.now() - 7 * 60 * 1000);
-        const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+        const silentPingMinutes = new Set([7, 10, 13]);
         const activeMembers = await this.prisma.familyMember.findMany({
+            where: {
+                OR: [
+                    { memberType: { in: [client_1.MemberType.child, client_1.MemberType.elder] } },
+                    {
+                        memberType: client_1.MemberType.guardian,
+                        guardianTrackingEnabled: true,
+                    },
+                ],
+            },
             select: { userId: true },
         });
         const uniqueUserIds = Array.from(new Set(activeMembers.map((m) => m.userId)));
@@ -256,12 +312,15 @@ let CronService = class CronService {
                 where: { userId },
                 orderBy: { recordedAt: 'desc' },
             });
-            if (lastLocation &&
-                lastLocation.recordedAt < sevenMinutesAgo &&
-                lastLocation.recordedAt > fifteenMinutesAgo) {
-                this.logger.log(`Kullanıcı (${userId}) için sessiz ping bildirimi gönderiliyor...`);
+            if (!lastLocation) {
+                continue;
+            }
+            const ageMinutes = Math.floor((Date.now() - lastLocation.recordedAt.getTime()) / (60 * 1000));
+            if (silentPingMinutes.has(ageMinutes)) {
+                this.logger.log(`Kullanici (${userId}) icin ${ageMinutes}. dakikada sessiz ping bildirimi gonderiliyor...`);
                 await this.locationsGateway.sendSilentPushNotification([userId], {
                     action: 'ping',
+                    ageMinutes,
                 });
             }
         }
@@ -281,7 +340,22 @@ let CronService = class CronService {
             this.logger.log(`Eski konum temizliği tamamlandı. Toplam silinen konum kaydı: ${deleteResult.count}`);
         }
         catch (error) {
-            this.logger.error(`Eski konum kayıtları temizlenirken hata oluştu: ${error.message}`);
+            this.logger.error(`Eski konum kayıtları temizlenirken hata oluştu: ${this.getErrorMessage(error)}`);
+        }
+    }
+    async handleResolvedAlertsCleanup() {
+        const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+        try {
+            const deleteResult = await this.prisma.alert.deleteMany({
+                where: {
+                    status: client_1.AlertStatus.resolved,
+                    resolvedAt: { lt: fiveDaysAgo },
+                },
+            });
+            this.logger.log(`Resolved alert cleanup completed. Deleted records: ${deleteResult.count}`);
+        }
+        catch (error) {
+            this.logger.error(`Resolved alerts cleanup failed: ${this.getErrorMessage(error)}`);
         }
     }
     async handleSessionsCleanup() {
@@ -293,7 +367,7 @@ let CronService = class CronService {
             this.logger.log(`Eski session temizliği tamamlandı. Silinen kayıt: ${deleteResult.count}`);
         }
         catch (error) {
-            this.logger.error(`Eski session kayıtları temizlenirken hata oluştu: ${error.message}`);
+            this.logger.error(`Eski session kayıtları temizlenirken hata oluştu: ${this.getErrorMessage(error)}`);
         }
     }
 };
@@ -317,7 +391,7 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], CronService.prototype, "handleMedicationReminderCheck", null);
 __decorate([
-    (0, schedule_1.Cron)('0 */5 * * * *'),
+    (0, schedule_1.Cron)('0 * * * * *'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", Promise)
@@ -328,6 +402,12 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", Promise)
 ], CronService.prototype, "handleLocationsCleanup", null);
+__decorate([
+    (0, schedule_1.Cron)('0 0 3 * * *', { timeZone: 'Europe/Istanbul' }),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", Promise)
+], CronService.prototype, "handleResolvedAlertsCleanup", null);
 __decorate([
     (0, schedule_1.Cron)('0 30 3 * * *'),
     __metadata("design:type", Function),

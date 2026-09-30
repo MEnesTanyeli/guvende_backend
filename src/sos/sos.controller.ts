@@ -2,10 +2,10 @@ import { Body, Controller, Post, UseGuards } from '@nestjs/common';
 import { SosService } from './sos.service';
 import { TriggerSosDto } from './dto/trigger-sos.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { SubscriptionGuard } from '../auth/guards/subscription.guard';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 
-@UseGuards(JwtAuthGuard, SubscriptionGuard)
+// SOS is intentionally available regardless of subscription state.
+@UseGuards(JwtAuthGuard)
 @Controller('sos')
 export class SosController {
   constructor(private sosService: SosService) {}

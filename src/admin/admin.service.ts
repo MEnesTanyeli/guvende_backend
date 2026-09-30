@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -12,12 +13,14 @@ import {
   UserQueryDto,
 } from './dto/admin-query.dto';
 import { UpdateAdminUserDto } from './dto/update-user.dto';
+import { LocationsGateway } from '../locations/locations.gateway';
 
 @Injectable()
 export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
+    private readonly locationsGateway: LocationsGateway,
   ) {}
 
   async dashboard() {
@@ -265,6 +268,16 @@ export class AdminService {
       throw new BadRequestException('Bu panelden yeni yönetici atayamazsınız.');
     }
 
+    const immutableProfileRoles = new Set(['guardian', 'child', 'elder']);
+    if (
+      dto.role !== undefined &&
+      dto.role !== userBefore.role &&
+      immutableProfileRoles.has(userBefore.role) &&
+      immutableProfileRoles.has(dto.role)
+    ) {
+      throw new ForbiddenException('Profil tipi kayit sonrasi degistirilemez.');
+    }
+
     const premiumExpiresAt =
       dto.premiumExpiresAt !== undefined
         ? new Date(dto.premiumExpiresAt)
@@ -327,6 +340,7 @@ export class AdminService {
         'Yönetici hesaplarını bu panelden silemezsiniz.',
       );
     await this.prisma.user.delete({ where: { id: userId } });
+    this.locationsGateway.disconnectUser(userId);
     await this.logAction(adminId, 'USER_DELETE', userId, {
       name: user.name,
       email: user.email,
@@ -336,10 +350,23 @@ export class AdminService {
 
   async resetDevice(adminId: string, userId: string) {
     await this.ensureUser(userId);
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { deviceId: null },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`session-security:${userId}`}, 0))`;
+      await tx.session.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      await tx.childElderLogoutApproval.deleteMany({ where: { userId } });
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          deviceId: null,
+          loginAllowed: true,
+          deviceLoginBlocked: false,
+        },
+      });
     });
+    this.locationsGateway.disconnectUser(userId);
     await this.logAction(adminId, 'DEVICE_RESET', userId, {});
     return { success: true, message: 'Cihaz kilidi sıfırlandı.' };
   }

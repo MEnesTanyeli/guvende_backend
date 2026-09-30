@@ -16,6 +16,7 @@ const auth_controller_1 = require("./auth.controller");
 const jwt_strategy_1 = require("./strategies/jwt.strategy");
 const users_module_1 = require("../users/users.module");
 const mail_module_1 = require("../mail/mail.module");
+const locations_module_1 = require("../locations/locations.module");
 let AuthModule = class AuthModule {
 };
 exports.AuthModule = AuthModule;
@@ -33,7 +34,8 @@ exports.AuthModule = AuthModule = __decorate([
                     },
                 }),
             }),
-            users_module_1.UsersModule,
+            (0, common_1.forwardRef)(() => users_module_1.UsersModule),
+            (0, common_1.forwardRef)(() => locations_module_1.LocationsModule),
             mail_module_1.MailModule,
         ],
         providers: [auth_service_1.AuthService, jwt_strategy_1.JwtStrategy],

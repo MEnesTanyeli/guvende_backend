@@ -3,10 +3,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AdminQueryDto, AlertQueryDto, UserQueryDto } from './dto/admin-query.dto';
 import { UpdateAdminUserDto } from './dto/update-user.dto';
+import { LocationsGateway } from '../locations/locations.gateway';
 export declare class AdminService {
     private readonly prisma;
     private readonly notificationsService;
-    constructor(prisma: PrismaService, notificationsService: NotificationsService);
+    private readonly locationsGateway;
+    constructor(prisma: PrismaService, notificationsService: NotificationsService, locationsGateway: LocationsGateway);
     dashboard(): Promise<{
         totals: {
             users: number;
@@ -77,23 +79,25 @@ export declare class AdminService {
         } & {
             id: string;
             createdAt: Date;
-            familyId: string;
             userId: string;
+            familyId: string;
             memberType: import(".prisma/client").$Enums.MemberType;
             permissions: string[];
             muteNotifications: boolean;
+            guardianTrackingEnabled: boolean;
         })[];
         alerts: {
             id: string;
             createdAt: Date;
-            message: string;
-            familyId: string;
-            userId: string;
             type: import(".prisma/client").$Enums.AlertType;
-            title: string;
+            message: string;
+            userId: string;
+            familyId: string;
             status: import(".prisma/client").$Enums.AlertStatus;
+            title: string;
             metadata: Prisma.JsonValue | null;
             resolvedAt: Date | null;
+            audibleWarningId: string | null;
         }[];
     }>;
     userHistory(adminId: string, userId: string, dateStr?: string): Promise<{
@@ -121,7 +125,13 @@ export declare class AdminService {
         batteryLevel: number | null;
         isCharging: boolean | null;
         connectionStatus: string;
+        movementStatus: string;
         recordedAt: Date;
+        receivedAt: Date;
+        devicePointId: string | null;
+        filterVersion: string;
+        deliveryMode: string;
+        deferredReason: string | null;
     }) | null)[]>;
     updateUser(adminId: string, userId: string, dto: UpdateAdminUserDto): Promise<{
         id: string;
@@ -132,6 +142,7 @@ export declare class AdminService {
         isPremium: boolean;
         premiumExpiresAt: Date | null;
     }>;
+    private getDefaultPremiumExpiry;
     deleteUser(adminId: string, userId: string): Promise<{
         success: boolean;
     }>;
@@ -157,6 +168,7 @@ export declare class AdminService {
             createdAt: Date;
             updatedAt: Date;
             inviteCode: string | null;
+            sosEncryptionKey: string | null;
             type: string;
             ownerId: string;
         })[];
@@ -169,14 +181,15 @@ export declare class AdminService {
         alerts: {
             id: string;
             createdAt: Date;
-            message: string;
-            familyId: string;
-            userId: string;
             type: import(".prisma/client").$Enums.AlertType;
-            title: string;
+            message: string;
+            userId: string;
+            familyId: string;
             status: import(".prisma/client").$Enums.AlertStatus;
+            title: string;
             metadata: Prisma.JsonValue | null;
             resolvedAt: Date | null;
+            audibleWarningId: string | null;
         }[];
         owner: {
             id: string;
@@ -195,19 +208,20 @@ export declare class AdminService {
         } & {
             id: string;
             createdAt: Date;
-            familyId: string;
             userId: string;
+            familyId: string;
             memberType: import(".prisma/client").$Enums.MemberType;
             permissions: string[];
             muteNotifications: boolean;
+            guardianTrackingEnabled: boolean;
         })[];
         safeZones: {
             id: string;
             name: string;
             createdAt: Date;
-            familyId: string;
             latitude: number;
             longitude: number;
+            familyId: string;
             radius: number;
             createdBy: string;
         }[];
@@ -217,6 +231,7 @@ export declare class AdminService {
         createdAt: Date;
         updatedAt: Date;
         inviteCode: string | null;
+        sosEncryptionKey: string | null;
         type: string;
         ownerId: string;
     }>;
@@ -237,14 +252,15 @@ export declare class AdminService {
         } & {
             id: string;
             createdAt: Date;
-            message: string;
-            familyId: string;
-            userId: string;
             type: import(".prisma/client").$Enums.AlertType;
-            title: string;
+            message: string;
+            userId: string;
+            familyId: string;
             status: import(".prisma/client").$Enums.AlertStatus;
+            title: string;
             metadata: Prisma.JsonValue | null;
             resolvedAt: Date | null;
+            audibleWarningId: string | null;
         })[];
         total: number;
         page: number;
@@ -254,17 +270,18 @@ export declare class AdminService {
     resolveAlert(adminId: string, id: string): Promise<{
         id: string;
         createdAt: Date;
-        message: string;
-        familyId: string;
-        userId: string;
         type: import(".prisma/client").$Enums.AlertType;
-        title: string;
+        message: string;
+        userId: string;
+        familyId: string;
         status: import(".prisma/client").$Enums.AlertStatus;
+        title: string;
         metadata: Prisma.JsonValue | null;
         resolvedAt: Date | null;
+        audibleWarningId: string | null;
     }>;
     private ensureUser;
-    logAction(adminId: string, action: string, targetId: string, details: any): Promise<void>;
+    logAction(adminId: string, action: string, targetId: string, details?: Prisma.InputJsonValue): Promise<void>;
     auditLogs(query: AdminQueryDto): Promise<{
         items: ({
             admin: {
