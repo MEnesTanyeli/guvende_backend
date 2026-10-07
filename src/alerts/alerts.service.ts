@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { AlertStatus, MemberType } from '@prisma/client';
+import { AlertStatus, MemberType, Prisma } from '@prisma/client';
 import { SubscriptionEntitlementService } from '../common/subscription-entitlement.service';
 
 @Injectable()
@@ -15,7 +15,6 @@ export class AlertsService {
   ) {}
 
   async findAll(userId: string, familyId: string) {
-    await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
     // Aile grubuna üye olduğunu doğrula
     const membership = await this.prisma.familyMember.findUnique({
       where: {
@@ -38,9 +37,16 @@ export class AlertsService {
       );
     }
 
+    await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
+
     return this.prisma.alert.findMany({
       where: {
         familyId,
+        family: {
+          members: {
+            some: { userId, memberType: MemberType.guardian },
+          },
+        },
       },
       include: {
         user: {
@@ -57,8 +63,16 @@ export class AlertsService {
   }
 
   async resolve(userId: string, alertId: string) {
-    const alert = await this.prisma.alert.findUnique({
-      where: { id: alertId },
+    const guardianFamilyScope = {
+      members: {
+        some: { userId, memberType: MemberType.guardian },
+      },
+    };
+    const alert = await this.prisma.alert.findFirst({
+      where: {
+        id: alertId,
+        family: { is: guardianFamilyScope },
+      },
     });
 
     if (!alert) {
@@ -67,39 +81,31 @@ export class AlertsService {
 
     await this.subscriptionEntitlement.assertFamilyEntitled(alert.familyId);
 
-    // Aile grubu üyeliği ve gardiyan rolünü doğrula
-    const membership = await this.prisma.familyMember.findUnique({
-      where: {
-        familyId_userId: {
-          familyId: alert.familyId,
-          userId,
+    try {
+      return await this.prisma.alert.update({
+        where: {
+          id: alertId,
+          family: { is: guardianFamilyScope },
         },
-      },
-    });
-
-    if (!membership) {
-      throw new ForbiddenException(
-        'Bu aile grubunun alarmını çözmeye yetkiniz yok.',
-      );
+        data: {
+          status: AlertStatus.resolved,
+          resolvedAt: new Date(),
+        },
+      });
+    } catch (error) {
+      // Membership may be revoked after the scoped read; keep the resource
+      // indistinguishable from a missing alert in that race.
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
+        throw new NotFoundException('Alarm bulunamadı.');
+      }
+      throw error;
     }
-
-    if (membership.memberType !== MemberType.guardian) {
-      throw new ForbiddenException(
-        'Sadece veliler/koruyucular (guardian) alarmları çözebilir.',
-      );
-    }
-
-    return this.prisma.alert.update({
-      where: { id: alertId },
-      data: {
-        status: AlertStatus.resolved,
-        resolvedAt: new Date(),
-      },
-    });
   }
 
   async resolveAll(userId: string, familyId: string) {
-    await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
     // Aile grubu üyeliği ve gardiyan rolünü doğrula
     const membership = await this.prisma.familyMember.findUnique({
       where: {
@@ -122,10 +128,17 @@ export class AlertsService {
       );
     }
 
+    await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
+
     return this.prisma.alert.updateMany({
       where: {
         familyId,
         status: AlertStatus.active,
+        family: {
+          members: {
+            some: { userId, memberType: MemberType.guardian },
+          },
+        },
       },
       data: {
         status: AlertStatus.resolved,

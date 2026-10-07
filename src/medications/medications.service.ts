@@ -7,9 +7,15 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateMedicationDto } from './dto/create-medication.dto';
 import { UpdateMedicationDto } from './dto/update-medication.dto';
 import { UsersService } from '../users/users.service';
-import { AlertType, MemberType } from '@prisma/client';
+import { AlertType, MemberType, Prisma } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SubscriptionEntitlementService } from '../common/subscription-entitlement.service';
+import { FamilyMembershipLockService } from '../common/family-membership-lock.service';
+
+type MedicationMembershipClient = Pick<
+  Prisma.TransactionClient,
+  'familyMember'
+>;
 
 @Injectable()
 export class MedicationsService {
@@ -18,7 +24,85 @@ export class MedicationsService {
     private usersService: UsersService,
     private notificationsService: NotificationsService,
     private subscriptionEntitlement: SubscriptionEntitlementService,
+    private familyMembershipLock: FamilyMembershipLockService = new FamilyMembershipLockService(),
   ) {}
+
+  private async findAuthorizationFamilyIds(
+    client: MedicationMembershipClient,
+    requesterId: string,
+    targetUserId: string,
+    candidateFamilyIds?: string[],
+  ): Promise<string[]> {
+    const where: Prisma.FamilyMemberWhereInput = {
+      userId: targetUserId,
+      family: {
+        members: {
+          some: {
+            userId: requesterId,
+            memberType: MemberType.guardian,
+          },
+        },
+      },
+    };
+
+    if (requesterId !== targetUserId) {
+      where.memberType = { in: [MemberType.child, MemberType.elder] };
+    }
+    if (candidateFamilyIds) {
+      where.familyId = { in: candidateFamilyIds };
+    }
+
+    const memberships = await client.familyMember.findMany({
+      where,
+      select: { familyId: true },
+    });
+
+    return [...new Set(memberships.map(({ familyId }) => familyId))].sort();
+  }
+
+  private async lockAndFindAuthorizationFamily(
+    tx: Prisma.TransactionClient,
+    requesterId: string,
+    targetUserId: string,
+    candidateFamilyIds: string[],
+    forbiddenMessage: string,
+  ): Promise<string> {
+    const sortedFamilyIds = [...new Set(candidateFamilyIds)].sort();
+    for (const familyId of sortedFamilyIds) {
+      await this.familyMembershipLock.lockFamilyMembership(tx, familyId);
+    }
+
+    const authorizedFamilyIds = await this.findAuthorizationFamilyIds(
+      tx,
+      requesterId,
+      targetUserId,
+      sortedFamilyIds,
+    );
+    const authorizedFamilyId = authorizedFamilyIds[0];
+    if (!authorizedFamilyId) {
+      throw new ForbiddenException(forbiddenMessage);
+    }
+
+    return authorizedFamilyId;
+  }
+
+  private async assertChildOrElderUser(
+    tx: Prisma.TransactionClient,
+    targetUserId: string,
+    notFoundMessage: string,
+    forbiddenMessage: string,
+  ): Promise<void> {
+    const targetUser = await tx.user.findUnique({
+      where: { id: targetUserId },
+      select: { role: true },
+    });
+    if (!targetUser) {
+      throw new NotFoundException(notFoundMessage);
+    }
+    if (targetUser.role !== 'elder' && targetUser.role !== 'child') {
+      throw new ForbiddenException(forbiddenMessage);
+    }
+  }
 
   async createReminder(creatorId: string, dto: CreateMedicationDto) {
     const creatorProfile = await this.usersService.findOne(creatorId);
@@ -40,39 +124,44 @@ export class MedicationsService {
       );
     }
 
-    const commonFamily = await this.prisma.familyMember.findFirst({
-      where: {
-        userId: dto.userId,
-        family: {
-          members: {
-            some: {
-              userId: creatorId,
-              memberType: MemberType.guardian,
-            },
-          },
-        },
-      },
-    });
-
-    if (!commonFamily) {
+    const candidateFamilyIds = await this.findAuthorizationFamilyIds(
+      this.prisma,
+      creatorId,
+      dto.userId,
+    );
+    if (candidateFamilyIds.length === 0) {
       throw new ForbiddenException(
         'Bu üyeye ilaç hatırlatıcısı ekleme yetkiniz yok.',
       );
     }
-    await this.subscriptionEntitlement.assertFamilyEntitled(
-      commonFamily.familyId,
-    );
+    return this.prisma.$transaction(async (tx) => {
+      const familyId = await this.lockAndFindAuthorizationFamily(
+        tx,
+        creatorId,
+        dto.userId,
+        candidateFamilyIds,
+        'Bu üyeye ilaç hatırlatıcısı ekleme yetkiniz yok.',
+      );
 
-    return this.prisma.medicationReminder.create({
-      data: {
-        userId: dto.userId,
-        medicationName: dto.medicationName,
-        dosage: dto.dosage,
-        time: dto.time,
-        reminderType: dto.reminderType || 'medication',
-        startDate: dto.startDate ? new Date(dto.startDate) : new Date(),
-        repeatDays: dto.repeatDays ? Number(dto.repeatDays) : null,
-      },
+      await this.assertChildOrElderUser(
+        tx,
+        dto.userId,
+        'İlaç atanacak üye bulunamadı.',
+        'İlaç hatırlatıcıları sadece çocuklar veya aile büyükleri için tanımlanabilir.',
+      );
+      await this.subscriptionEntitlement.assertFamilyEntitled(familyId, tx);
+
+      return tx.medicationReminder.create({
+        data: {
+          userId: dto.userId,
+          medicationName: dto.medicationName,
+          dosage: dto.dosage,
+          time: dto.time,
+          reminderType: dto.reminderType || 'medication',
+          startDate: dto.startDate ? new Date(dto.startDate) : new Date(),
+          repeatDays: dto.repeatDays ? Number(dto.repeatDays) : null,
+        },
+      });
     });
   }
 
@@ -143,31 +232,44 @@ export class MedicationsService {
       throw new NotFoundException('İlaç hatırlatıcısı bulunamadı.');
     }
 
-    const commonFamily = await this.prisma.familyMember.findFirst({
-      where: {
-        userId: reminder.userId,
-        family: {
-          members: {
-            some: {
-              userId: deleterId,
-              memberType: MemberType.guardian,
-            },
-          },
-        },
-      },
-    });
-
-    if (!commonFamily) {
+    const candidateFamilyIds = await this.findAuthorizationFamilyIds(
+      this.prisma,
+      deleterId,
+      reminder.userId,
+    );
+    if (candidateFamilyIds.length === 0) {
       throw new ForbiddenException(
         'Bu ilaç hatırlatıcısını silme yetkiniz yok.',
       );
     }
-    await this.subscriptionEntitlement.assertFamilyEntitled(
-      commonFamily.familyId,
-    );
+    return this.prisma.$transaction(async (tx) => {
+      const familyId = await this.lockAndFindAuthorizationFamily(
+        tx,
+        deleterId,
+        reminder.userId,
+        candidateFamilyIds,
+        'Bu ilaç hatırlatıcısını silme yetkiniz yok.',
+      );
 
-    return this.prisma.medicationReminder.delete({
-      where: { id: reminderId },
+      const currentReminder = await tx.medicationReminder.findFirst({
+        where: { id: reminderId, userId: reminder.userId },
+      });
+      if (!currentReminder) {
+        throw new NotFoundException('İlaç hatırlatıcısı bulunamadı.');
+      }
+      if (deleterId !== currentReminder.userId) {
+        await this.assertChildOrElderUser(
+          tx,
+          currentReminder.userId,
+          'İlaç atanacak üye bulunamadı.',
+          'Bu ilaç hatırlatıcısını silme yetkiniz yok.',
+        );
+      }
+      await this.subscriptionEntitlement.assertFamilyEntitled(familyId, tx);
+
+      return tx.medicationReminder.delete({
+        where: { id: reminderId, userId: currentReminder.userId },
+      });
     });
   }
 
@@ -250,42 +352,55 @@ export class MedicationsService {
       throw new NotFoundException('Hatırlatıcı bulunamadı.');
     }
 
-    const commonFamily = await this.prisma.familyMember.findFirst({
-      where: {
-        userId: reminder.userId,
-        family: {
-          members: {
-            some: {
-              userId: updaterId,
-              memberType: MemberType.guardian,
-            },
-          },
-        },
-      },
-    });
-
-    if (!commonFamily) {
+    const candidateFamilyIds = await this.findAuthorizationFamilyIds(
+      this.prisma,
+      updaterId,
+      reminder.userId,
+    );
+    if (candidateFamilyIds.length === 0) {
       throw new ForbiddenException('Bu hatırlatıcıyı düzenleme yetkiniz yok.');
     }
-    await this.subscriptionEntitlement.assertFamilyEntitled(
-      commonFamily.familyId,
-    );
+    return this.prisma.$transaction(async (tx) => {
+      const familyId = await this.lockAndFindAuthorizationFamily(
+        tx,
+        updaterId,
+        reminder.userId,
+        candidateFamilyIds,
+        'Bu hatırlatıcıyı düzenleme yetkiniz yok.',
+      );
 
-    return this.prisma.medicationReminder.update({
-      where: { id: reminderId },
-      data: {
-        medicationName: dto.medicationName,
-        dosage: dto.dosage,
-        time: dto.time,
-        reminderType: dto.reminderType,
-        startDate: dto.startDate ? new Date(dto.startDate) : undefined,
-        repeatDays:
-          dto.repeatDays !== undefined
-            ? dto.repeatDays
-              ? Number(dto.repeatDays)
-              : null
-            : undefined,
-      },
+      const currentReminder = await tx.medicationReminder.findFirst({
+        where: { id: reminderId, userId: reminder.userId },
+      });
+      if (!currentReminder) {
+        throw new NotFoundException('Hatırlatıcı bulunamadı.');
+      }
+      if (updaterId !== currentReminder.userId) {
+        await this.assertChildOrElderUser(
+          tx,
+          currentReminder.userId,
+          'Hatırlatıcı bulunamadı.',
+          'Bu hatırlatıcıyı düzenleme yetkiniz yok.',
+        );
+      }
+      await this.subscriptionEntitlement.assertFamilyEntitled(familyId, tx);
+
+      return tx.medicationReminder.update({
+        where: { id: reminderId, userId: currentReminder.userId },
+        data: {
+          medicationName: dto.medicationName,
+          dosage: dto.dosage,
+          time: dto.time,
+          reminderType: dto.reminderType,
+          startDate: dto.startDate ? new Date(dto.startDate) : undefined,
+          repeatDays:
+            dto.repeatDays !== undefined
+              ? dto.repeatDays
+                ? Number(dto.repeatDays)
+                : null
+              : undefined,
+        },
+      });
     });
   }
 }

@@ -10,6 +10,7 @@ import { MemberType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { LocationsGateway } from '../locations/locations.gateway';
 import { OfflineSosService } from '../offline-sos/offline-sos.service';
+import { FamilyMembershipLockService } from '../common/family-membership-lock.service';
 
 @Injectable()
 export class UsersService {
@@ -17,6 +18,7 @@ export class UsersService {
     private prisma: PrismaService,
     private locationsGateway: LocationsGateway,
     private offlineSosService: OfflineSosService,
+    private familyMembershipLock: FamilyMembershipLockService = new FamilyMembershipLockService(),
   ) {}
 
   private async lockProxyMutation(
@@ -52,6 +54,9 @@ export class UsersService {
   async deleteAccount(userId: string, password: string) {
     const familyIds = await this.prisma
       .$transaction(async (tx) => {
+        await this.lockProxyMutation(tx, userId);
+        await this.familyMembershipLock.lockUserMembership(tx, userId);
+
         // Lock the owner before collecting families; serialize password changes/deletes
         // and prevent new ownership FK references until the delete commits.
         await tx.$queryRaw`SELECT id FROM users WHERE id = ${userId} FOR UPDATE`;
@@ -66,6 +71,21 @@ export class UsersService {
           where: { ownerId: userId },
           select: { id: true },
         });
+
+        const memberships = await tx.familyMember.findMany({
+          where: { userId },
+          select: { familyId: true },
+        });
+        const affectedFamilyIds = [
+          ...new Set([
+            ...families.map((family) => family.id),
+            ...memberships.map((membership) => membership.familyId),
+          ]),
+        ].sort();
+        for (const familyId of affectedFamilyIds) {
+          await this.familyMembershipLock.lockFamilyMembership(tx, familyId);
+        }
+
         await tx.user.delete({ where: { id: userId } });
         return families.map((family) => family.id);
       })
@@ -332,7 +352,11 @@ export class UsersService {
         where: { ownerId: userId },
         select: { id: true },
       });
-      for (const family of ownerFamilies) {
+      for (const family of ownerFamilies.sort((a, b) =>
+        a.id.localeCompare(b.id),
+      )) {
+        await this.familyMembershipLock.lockFamilyMembership(tx, family.id);
+
         const deleted = await tx.familyMember.deleteMany({
           where: {
             familyId: family.id,

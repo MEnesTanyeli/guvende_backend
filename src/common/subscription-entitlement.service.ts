@@ -1,4 +1,5 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -26,9 +27,12 @@ export class SubscriptionEntitlementService {
     }));
   }
 
-  async isFamilyEntitled(familyId: string): Promise<boolean> {
+  async isFamilyEntitled(
+    familyId: string,
+    client: PrismaService | Prisma.TransactionClient = this.prisma,
+  ): Promise<boolean> {
     if (process.env.EARLY_ACCESS_ENABLED === 'true') return true;
-    return !!(await this.prisma.family.findFirst({
+    return !!(await client.family.findFirst({
       where: { id: familyId, owner: this.activeWhere(new Date()) },
       select: { id: true },
     }));
@@ -40,9 +44,12 @@ export class SubscriptionEntitlementService {
     this.deny();
   }
 
-  async assertFamilyEntitled(familyId: string): Promise<void> {
+  async assertFamilyEntitled(
+    familyId: string,
+    client: PrismaService | Prisma.TransactionClient = this.prisma,
+  ): Promise<void> {
     this.assertEnabled();
-    if (await this.isFamilyEntitled(familyId)) return;
+    if (await this.isFamilyEntitled(familyId, client)) return;
     this.deny();
   }
 

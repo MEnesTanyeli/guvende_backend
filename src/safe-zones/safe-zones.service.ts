@@ -7,51 +7,55 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateSafeZoneDto } from './dto/create-safe-zone.dto';
 import { MemberType } from '@prisma/client';
 import { SubscriptionEntitlementService } from '../common/subscription-entitlement.service';
+import { FamilyMembershipLockService } from '../common/family-membership-lock.service';
 
 @Injectable()
 export class SafeZonesService {
   constructor(
     private prisma: PrismaService,
     private subscriptionEntitlement: SubscriptionEntitlementService,
+    private familyMembershipLock: FamilyMembershipLockService = new FamilyMembershipLockService(),
   ) {}
 
   async create(userId: string, familyId: string, dto: CreateSafeZoneDto) {
-    await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
-    // Aile grubuna üyelik kontrolü
-    const membership = await this.prisma.familyMember.findUnique({
-      where: {
-        familyId_userId: {
-          familyId,
-          userId,
+    return this.prisma.$transaction(async (tx) => {
+      await this.familyMembershipLock.lockFamilyMembership(tx, familyId);
+
+      const membership = await tx.familyMember.findUnique({
+        where: {
+          familyId_userId: {
+            familyId,
+            userId,
+          },
         },
-      },
-    });
+      });
 
-    if (!membership) {
-      throw new ForbiddenException('Bu aile grubuna erişim yetkiniz yok.');
-    }
+      if (!membership) {
+        throw new ForbiddenException('Bu aile grubuna erişim yetkiniz yok.');
+      }
 
-    // Sadece koruyucular (guardian) güvenli bölge ekleyebilir
-    if (membership.memberType !== MemberType.guardian) {
-      throw new ForbiddenException(
-        'Güvenli bölge eklemek için koruyucu (guardian) olmalısınız.',
-      );
-    }
+      if (membership.memberType !== MemberType.guardian) {
+        throw new ForbiddenException(
+          'Güvenli bölge eklemek için koruyucu (guardian) olmalısınız.',
+        );
+      }
 
-    return this.prisma.safeZone.create({
-      data: {
-        familyId,
-        name: dto.name,
-        latitude: dto.latitude,
-        longitude: dto.longitude,
-        radius: dto.radius,
-        createdBy: userId,
-      },
+      await this.subscriptionEntitlement.assertFamilyEntitled(familyId, tx);
+
+      return tx.safeZone.create({
+        data: {
+          familyId,
+          name: dto.name,
+          latitude: dto.latitude,
+          longitude: dto.longitude,
+          radius: dto.radius,
+          createdBy: userId,
+        },
+      });
     });
   }
 
   async findAll(userId: string, familyId: string) {
-    await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
     const membership = await this.prisma.familyMember.findUnique({
       where: {
         familyId_userId: {
@@ -71,9 +75,16 @@ export class SafeZonesService {
       );
     }
 
+    await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
+
     return this.prisma.safeZone.findMany({
       where: {
         familyId,
+        family: {
+          members: {
+            some: { userId, memberType: MemberType.guardian },
+          },
+        },
       },
       orderBy: {
         createdAt: 'desc',
@@ -82,8 +93,16 @@ export class SafeZonesService {
   }
 
   async remove(userId: string, safeZoneId: string) {
-    const safeZone = await this.prisma.safeZone.findUnique({
-      where: { id: safeZoneId },
+    const guardianFamilyScope = {
+      members: {
+        some: { userId, memberType: MemberType.guardian },
+      },
+    };
+    const safeZone = await this.prisma.safeZone.findFirst({
+      where: {
+        id: safeZoneId,
+        family: { is: guardianFamilyScope },
+      },
     });
 
     if (!safeZone) {
@@ -92,24 +111,15 @@ export class SafeZonesService {
 
     await this.subscriptionEntitlement.assertFamilyEntitled(safeZone.familyId);
 
-    const membership = await this.prisma.familyMember.findUnique({
+    const deleted = await this.prisma.safeZone.deleteMany({
       where: {
-        familyId_userId: {
-          familyId: safeZone.familyId,
-          userId,
-        },
+        id: safeZoneId,
+        family: { is: guardianFamilyScope },
       },
     });
-
-    if (!membership || membership.memberType !== MemberType.guardian) {
-      throw new ForbiddenException(
-        'Bu güvenli bölgeyi silmek için yetkiniz yok.',
-      );
+    if (deleted.count === 0) {
+      throw new NotFoundException('Güvenli bölge bulunamadı.');
     }
-
-    await this.prisma.safeZone.delete({
-      where: { id: safeZoneId },
-    });
 
     return { message: 'Güvenli bölge başarıyla silindi.' };
   }

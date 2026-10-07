@@ -14,6 +14,7 @@ import {
 } from './dto/admin-query.dto';
 import { UpdateAdminUserDto } from './dto/update-user.dto';
 import { LocationsGateway } from '../locations/locations.gateway';
+import { FamilyMembershipLockService } from '../common/family-membership-lock.service';
 
 @Injectable()
 export class AdminService {
@@ -21,6 +22,7 @@ export class AdminService {
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
     private readonly locationsGateway: LocationsGateway,
+    private readonly familyMembershipLock: FamilyMembershipLockService = new FamilyMembershipLockService(),
   ) {}
 
   async dashboard() {
@@ -330,16 +332,40 @@ export class AdminService {
   async deleteUser(adminId: string, userId: string) {
     if (adminId === userId)
       throw new BadRequestException('Kendi yönetici hesabınızı silemezsiniz.');
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, name: true, email: true, role: true },
+    const user = await this.prisma.$transaction(async (tx) => {
+      await this.familyMembershipLock.lockUserMembership(tx, userId);
+
+      const user = await tx.user.findUnique({
+        where: { id: userId },
+        select: { id: true, name: true, email: true, role: true },
+      });
+      if (!user) throw new NotFoundException('Kullanıcı bulunamadı.');
+      if (user.role === 'admin')
+        throw new BadRequestException(
+          'Yönetici hesaplarını bu panelden silemezsiniz.',
+        );
+
+      const families = await tx.family.findMany({
+        where: { ownerId: userId },
+        select: { id: true },
+      });
+      const memberships = await tx.familyMember.findMany({
+        where: { userId },
+        select: { familyId: true },
+      });
+      const affectedFamilyIds = [
+        ...new Set([
+          ...families.map((family) => family.id),
+          ...memberships.map((membership) => membership.familyId),
+        ]),
+      ].sort();
+      for (const familyId of affectedFamilyIds) {
+        await this.familyMembershipLock.lockFamilyMembership(tx, familyId);
+      }
+
+      await tx.user.delete({ where: { id: userId } });
+      return user;
     });
-    if (!user) throw new NotFoundException('Kullanıcı bulunamadı.');
-    if (user.role === 'admin')
-      throw new BadRequestException(
-        'Yönetici hesaplarını bu panelden silemezsiniz.',
-      );
-    await this.prisma.user.delete({ where: { id: userId } });
     this.locationsGateway.disconnectUser(userId);
     await this.logAction(adminId, 'USER_DELETE', userId, {
       name: user.name,
