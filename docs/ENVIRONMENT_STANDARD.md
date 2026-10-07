@@ -18,6 +18,7 @@ This project follows `software-playbook-v1.3` environment rules.
 - New required environment variables must be added to `.env.dev.example`, `.env.production.example`, and deployment notes.
 - `DATABASE_URL` is constructed inside the compose files from the environment-specific PostgreSQL values.
 - `JWT_SECRET` must be at least 32 characters.
+- `OFFLINE_SOS_MASTER_KEY` must be a stable 32-byte base64url secret. The production initializer generates it once; preserve the value across restarts and deployments.
 
 ## Local Database
 

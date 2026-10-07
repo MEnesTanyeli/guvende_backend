@@ -1,6 +1,7 @@
 node_modules
 dist
 coverage
+/.audit-build-reset-password-20261002/
 .env
 .env.*
 !.env*.example
