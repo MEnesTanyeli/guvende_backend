@@ -3,6 +3,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { PassportModule } from '@nestjs/passport';
 import { AuthService } from './auth.service';
+import { LoginAttemptService } from './login-attempt.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { UsersModule } from '../users/users.module';
@@ -26,7 +27,7 @@ import { LocationsModule } from '../locations/locations.module';
     forwardRef(() => LocationsModule),
     MailModule,
   ],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, LoginAttemptService],
   controllers: [AuthController],
   exports: [AuthService, PassportModule, JwtModule],
 })

@@ -1,3 +1,4 @@
+import { Transform } from 'class-transformer';
 import {
   IsEmail,
   IsNotEmpty,
@@ -5,8 +6,12 @@ import {
   IsString,
   MinLength,
 } from 'class-validator';
+import { normalizeLoginEmail } from '../login-email';
 
 export class LoginDto {
+  @Transform(({ value }) =>
+    typeof value === 'string' ? normalizeLoginEmail(value) : (value as unknown),
+  )
   @IsEmail({}, { message: 'Geçerli bir e-posta adresi giriniz.' })
   @IsNotEmpty({ message: 'E-posta alanı boş bırakılamaz.' })
   email: string;

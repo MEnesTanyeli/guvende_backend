@@ -20,15 +20,20 @@ import { LoginDto } from './dto/login.dto';
 import { UsersService } from '../users/users.service';
 import { MailService } from '../mail/mail.service';
 import { LocationsGateway } from '../locations/locations.gateway';
+import { LoginAttemptService } from './login-attempt.service';
+import { normalizeLoginEmail } from './login-email';
+import { errorLogger } from '../common/logger';
 
 type RefreshSecurityResult =
   | { kind: 'invalid' }
-  | { kind: 'expired' }
-  | { kind: 'revoked' }
-  | { kind: 'grace'; retryAfterMs: number }
+  | { kind: 'expired'; sessionIds: string[] }
+  | { kind: 'revoked'; sessionIds: string[] }
+  | { kind: 'grace'; retryAfterMs: number; sessionIds: string[] }
+  | { kind: 'reuse-revoked'; sessionIds: string[] }
   | {
       kind: 'rotated';
       sessionId: string;
+      revokedSessionId: string;
       userId: string;
       email: string;
       refreshToken: string;
@@ -56,9 +61,9 @@ type LogoutApprovalPreparation =
 
 type PasswordResetResult =
   | { kind: 'success' }
-  | { kind: 'invalid-user' | 'expired' }
-  | { kind: 'invalid-code'; remainingAttempts: number }
-  | { kind: 'blocked'; blockedUntil: Date };
+  | {
+      kind: 'invalid-user' | 'expired' | 'invalid-code' | 'blocked';
+    };
 
 type RegistrationOtpPreparation =
   | { kind: 'existing'; expiresAt: Date }
@@ -98,6 +103,7 @@ export class AuthService {
     private mailService: MailService,
     @Inject(forwardRef(() => LocationsGateway))
     private locationsGateway: LocationsGateway,
+    private loginAttemptService: LoginAttemptService,
   ) {}
 
   async sendVerificationCode(email: string) {
@@ -327,89 +333,100 @@ export class AuthService {
   }
 
   async login(dto: LoginDto, requiredRole?: 'admin') {
-    const user = await this.prisma.user.findUnique({
-      where: { email: dto.email.toLowerCase() },
-      include: {
-        memberships: true,
-      },
-    });
+    const normalizedEmail = normalizeLoginEmail(dto.email);
+    const reservation = this.loginAttemptService.reserve(normalizedEmail);
 
-    if (!user) {
-      throw new UnauthorizedException('E-posta veya şifre hatalı.');
-    }
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { email: normalizedEmail },
+        include: {
+          memberships: true,
+        },
+      });
 
-    const isPasswordValid = await bcrypt.compare(
-      dto.password,
-      user.passwordHash,
-    );
-    if (!isPasswordValid) {
-      throw new UnauthorizedException('E-posta veya şifre hatalı.');
-    }
-
-    if (requiredRole && user.role !== requiredRole) {
-      throw new ForbiddenException('Bu hesap yönetim paneline erişemez.');
-    }
-
-    let tokens: Awaited<ReturnType<AuthService['createSession']>>;
-
-    // Cihaz Kilitleme Mantığı (Sadece child ve elder rolleri için)
-    if (user.role === 'child' || user.role === 'elder') {
-      if (!dto.deviceId) {
-        throw new BadRequestException(
-          'Bu hesap için cihaz kimliği doğrulaması gereklidir.',
-        );
+      if (!user) {
+        this.loginAttemptService.commitFailure(reservation);
+        throw new UnauthorizedException('E-posta veya şifre hatalı.');
       }
 
-      tokens = await this.withUserSessionSecurityLock(user.id, async (tx) => {
-        const currentDeviceState = await tx.user.findUnique({
-          where: { id: user.id },
-          select: {
-            deviceId: true,
-            deviceLoginBlocked: true,
-          },
-        });
-        if (!currentDeviceState) {
-          throw new UnauthorizedException('Kullanıcı bulunamadı.');
-        }
-        if (currentDeviceState.deviceLoginBlocked) {
-          throw new UnauthorizedException(
-            'Bu hesap veli onayıyla kapatılmıştır. Yeniden giriş için aile sahibinin cihazı sıfırlaması gerekir.',
+      const isPasswordValid = await bcrypt.compare(
+        dto.password,
+        user.passwordHash,
+      );
+      if (!isPasswordValid) {
+        this.loginAttemptService.commitFailure(reservation);
+        throw new UnauthorizedException('E-posta veya şifre hatalı.');
+      }
+
+      this.loginAttemptService.release(reservation);
+
+      if (requiredRole && user.role !== requiredRole) {
+        throw new ForbiddenException('Bu hesap yönetim paneline erişemez.');
+      }
+
+      let tokens: Awaited<ReturnType<AuthService['createSession']>>;
+
+      // Cihaz Kilitleme Mantığı (Sadece child ve elder rolleri için)
+      if (user.role === 'child' || user.role === 'elder') {
+        if (!dto.deviceId) {
+          throw new BadRequestException(
+            'Bu hesap için cihaz kimliği doğrulaması gereklidir.',
           );
         }
 
-        if (!currentDeviceState.deviceId) {
-          // İlk veya owner reset'i sonrası giriş: cihaz kimliğini yeniden bağla.
-          await tx.user.update({
+        tokens = await this.withUserSessionSecurityLock(user.id, async (tx) => {
+          const currentDeviceState = await tx.user.findUnique({
             where: { id: user.id },
-            data: {
-              deviceId: dto.deviceId,
-              loginAllowed: false,
+            select: {
+              deviceId: true,
+              deviceLoginBlocked: true,
             },
           });
-        } else if (currentDeviceState.deviceId !== dto.deviceId) {
-          throw new UnauthorizedException(
-            'Bu hesap başka bir cihaza kilitlenmiştir. Yeni cihazdan giriş yapmak için velinizin onay vermesi gerekmektedir.',
+          if (!currentDeviceState) {
+            throw new UnauthorizedException('Kullanıcı bulunamadı.');
+          }
+          if (currentDeviceState.deviceLoginBlocked) {
+            throw new UnauthorizedException(
+              'Bu hesap veli onayıyla kapatılmıştır. Yeniden giriş için aile sahibinin cihazı sıfırlaması gerekir.',
+            );
+          }
+
+          if (!currentDeviceState.deviceId) {
+            // İlk veya owner reset'i sonrası giriş: cihaz kimliğini yeniden bağla.
+            await tx.user.update({
+              where: { id: user.id },
+              data: {
+                deviceId: dto.deviceId,
+                loginAllowed: false,
+              },
+            });
+          } else if (currentDeviceState.deviceId !== dto.deviceId) {
+            throw new UnauthorizedException(
+              'Bu hesap başka bir cihaza kilitlenmiştir. Yeni cihazdan giriş yapmak için velinizin onay vermesi gerekmektedir.',
+            );
+          }
+
+          return this.createSessionInTransaction(
+            tx,
+            user.id,
+            user.email,
+            dto.deviceId,
           );
-        }
+        });
+      } else {
+        tokens = await this.createSession(user.id, user.email, dto.deviceId);
+      }
 
-        return this.createSessionInTransaction(
-          tx,
-          user.id,
-          user.email,
-          dto.deviceId,
-        );
-      });
-    } else {
-      tokens = await this.createSession(user.id, user.email, dto.deviceId);
+      const userProfile = await this.usersService.findOne(user.id);
+
+      return {
+        message: 'Giriş başarılı.',
+        ...tokens,
+        user: userProfile,
+      };
+    } finally {
+      this.loginAttemptService.release(reservation);
     }
-
-    const userProfile = await this.usersService.findOne(user.id);
-
-    return {
-      message: 'Giriş başarılı.',
-      ...tokens,
-      user: userProfile,
-    };
   }
 
   async adminLogin(dto: LoginDto) {
@@ -508,7 +525,7 @@ export class AuthService {
             where: { id: session.id, revokedAt: null },
             data: { revokedAt: now },
           });
-          return { kind: 'expired' };
+          return { kind: 'expired', sessionIds: [session.id] };
         }
 
         const nextRefreshToken = randomBytes(48).toString('base64url');
@@ -525,7 +542,7 @@ export class AuthService {
           },
         });
         if (claimed.count !== 1) {
-          return { kind: 'revoked' };
+          return { kind: 'revoked', sessionIds: [session.id] };
         }
         const nextSession = await tx.session.create({
           data: {
@@ -540,6 +557,7 @@ export class AuthService {
         return {
           kind: 'rotated',
           sessionId: nextSession.id,
+          revokedSessionId: session.id,
           userId: session.user.id,
           email: session.user.email,
           refreshToken: nextRefreshToken,
@@ -547,6 +565,28 @@ export class AuthService {
         };
       },
     );
+
+    const sessionIdsToDisconnect =
+      result.kind === 'rotated'
+        ? [result.revokedSessionId]
+        : result.kind === 'expired' ||
+            result.kind === 'revoked' ||
+            result.kind === 'grace' ||
+            result.kind === 'reuse-revoked'
+          ? result.sessionIds
+          : [];
+    if (sessionIdsToDisconnect.length > 0) {
+      try {
+        // withUserSessionSecurityLock has committed before this point.
+        this.locationsGateway.disconnectSessions(
+          candidate.userId,
+          sessionIdsToDisconnect,
+        );
+      } catch {
+        // A socket cleanup failure must not change the committed refresh result.
+        errorLogger.error('Refresh session socket disconnect failed');
+      }
+    }
 
     if (result.kind === 'invalid') {
       throw new UnauthorizedException('Geçersiz refresh token.');
@@ -565,7 +605,7 @@ export class AuthService {
         retryAfterMs: result.retryAfterMs,
       });
     }
-    if (result.kind === 'revoked') {
+    if (result.kind === 'revoked' || result.kind === 'reuse-revoked') {
       throw new UnauthorizedException(
         'Bu refresh token daha önce kullanılmış veya iptal edilmiş.',
       );
@@ -599,37 +639,37 @@ export class AuthService {
       const revokedSessionIds = await this.withUserSessionSecurityLock(
         candidate.userId,
         async (tx): Promise<string[]> => {
-        const session = await tx.session.findUnique({
-          where: { id: sessionId },
-          select: {
-            userId: true,
-            tokenFamilyId: true,
-            user: { select: { role: true } },
-          },
-        });
-        if (!session || session.userId !== candidate.userId) return [];
-        if (session.user.role === 'child' || session.user.role === 'elder') {
-          throw new ForbiddenException(
-            'Çocuk ve aile büyüğü hesaplarında çıkış için aile sahibi onayı gerekir.',
-          );
-        }
-        const sessionsToRevoke = await tx.session.findMany({
-          where: {
-            userId: session.userId,
-            tokenFamilyId: session.tokenFamilyId,
-            revokedAt: null,
-          },
-          select: { id: true },
-        });
-        await tx.session.updateMany({
-          where: {
-            userId: session.userId,
-            tokenFamilyId: session.tokenFamilyId,
-            revokedAt: null,
-          },
-          data: { revokedAt: new Date() },
-        });
-        return sessionsToRevoke.map((item) => item.id);
+          const session = await tx.session.findUnique({
+            where: { id: sessionId },
+            select: {
+              userId: true,
+              tokenFamilyId: true,
+              user: { select: { role: true } },
+            },
+          });
+          if (!session || session.userId !== candidate.userId) return [];
+          if (session.user.role === 'child' || session.user.role === 'elder') {
+            throw new ForbiddenException(
+              'Çocuk ve aile büyüğü hesaplarında çıkış için aile sahibi onayı gerekir.',
+            );
+          }
+          const sessionsToRevoke = await tx.session.findMany({
+            where: {
+              userId: session.userId,
+              tokenFamilyId: session.tokenFamilyId,
+              revokedAt: null,
+            },
+            select: { id: true },
+          });
+          await tx.session.updateMany({
+            where: {
+              userId: session.userId,
+              tokenFamilyId: session.tokenFamilyId,
+              revokedAt: null,
+            },
+            data: { revokedAt: new Date() },
+          });
+          return sessionsToRevoke.map((item) => item.id);
         },
       );
       this.locationsGateway.disconnectSessions(
@@ -967,6 +1007,7 @@ export class AuthService {
   private async handleRefreshTokenReuse(
     tx: Prisma.TransactionClient,
     session: {
+      id: string;
       userId: string;
       tokenFamilyId: string;
       revokedAt: Date | null;
@@ -980,9 +1021,17 @@ export class AuthService {
         return {
           kind: 'grace',
           retryAfterMs: Math.max(0, REFRESH_REUSE_GRACE_MS - elapsedMs),
+          sessionIds: [session.id],
         };
       }
 
+      const tokenFamilySessions = await tx.session.findMany({
+        where: {
+          userId: session.userId,
+          tokenFamilyId: session.tokenFamilyId,
+        },
+        select: { id: true },
+      });
       await tx.session.updateMany({
         where: {
           userId: session.userId,
@@ -991,9 +1040,15 @@ export class AuthService {
         },
         data: { revokedAt: now },
       });
+      return {
+        kind: 'reuse-revoked',
+        sessionIds: tokenFamilySessions.map(
+          (familySession) => familySession.id,
+        ),
+      };
     }
 
-    return { kind: 'revoked' };
+    return { kind: 'revoked', sessionIds: [session.id] };
   }
 
   private async withUserSessionSecurityLock<T>(
@@ -1020,6 +1075,13 @@ export class AuthService {
     return createHash('sha256').update(token).digest('hex');
   }
 
+  private forgotPasswordResponse() {
+    return {
+      message:
+        'Eğer bu e-posta adresiyle kayıtlı bir hesap varsa, şifre sıfırlama talimatları gönderilecektir.',
+    };
+  }
+
   async forgotPassword(email: string) {
     const cleanedEmail = email.toLowerCase().trim();
     const candidate = await this.prisma.user.findUnique({
@@ -1028,7 +1090,7 @@ export class AuthService {
     });
 
     if (!candidate) {
-      return { message: 'E-posta kayıtlıysa şifre sıfırlama kodu gönderildi.' };
+      return this.forgotPasswordResponse();
     }
 
     const prepared = await this.withUserSessionSecurityLock(
@@ -1120,40 +1182,22 @@ export class AuthService {
       },
     );
 
-    if (prepared.kind === 'missing') {
-      return { message: 'E-posta kayıtlıysa şifre sıfırlama kodu gönderildi.' };
-    }
-    if (prepared.kind === 'blocked') {
-      throw this.tooManyRequests(prepared.blockedUntil);
-    }
-    if (prepared.kind === 'existing') {
-      return {
-        message: 'Mevcut şifre sıfırlama kodunuz hâlâ geçerli.',
-        codeSent: false,
-        expiresAt: prepared.expiresAt,
-        remainingSeconds: this.remainingSeconds(prepared.expiresAt),
-      };
-    }
-
-    try {
-      await this.mailService.sendResetPasswordEmail(
-        prepared.email,
-        prepared.code,
-      );
-    } catch (error) {
-      await this.prisma.user.updateMany({
-        where: { id: prepared.userId, resetOtpCode: prepared.codeHash },
-        data: { resetOtpExpiresAt: new Date() },
-      });
-      throw error;
+    if (prepared.kind === 'send') {
+      try {
+        await this.mailService.sendResetPasswordEmail(
+          prepared.email,
+          prepared.code,
+        );
+      } catch {
+        await this.prisma.user.updateMany({
+          where: { id: prepared.userId, resetOtpCode: prepared.codeHash },
+          data: { resetOtpExpiresAt: new Date() },
+        });
+        errorLogger.error('Forgot-password email delivery failed');
+      }
     }
 
-    return {
-      message: 'Şifre sıfırlama kodu e-posta adresinize gönderildi.',
-      codeSent: true,
-      expiresAt: prepared.expiresAt,
-      remainingSeconds: this.remainingSeconds(prepared.expiresAt),
-    };
+    return this.forgotPasswordResponse();
   }
 
   async resetPassword(dto: {
@@ -1167,9 +1211,7 @@ export class AuthService {
     });
 
     if (!candidate) {
-      throw new BadRequestException(
-        'Geçersiz veya süresi dolmuş sıfırlama kodu.',
-      );
+      throw this.invalidResetCode();
     }
 
     const passwordHash = await bcrypt.hash(dto.newPassword, 10);
@@ -1191,10 +1233,7 @@ export class AuthService {
 
         const now = new Date();
         if (user.resetOtpBlockedUntil && user.resetOtpBlockedUntil > now) {
-          return {
-            kind: 'blocked',
-            blockedUntil: user.resetOtpBlockedUntil,
-          };
+          return { kind: 'blocked' };
         }
         if (
           !user.resetOtpCode ||
@@ -1218,11 +1257,8 @@ export class AuthService {
               resetOtpBlockedUntil: blockedUntil,
             },
           });
-          if (blockedUntil) return { kind: 'blocked', blockedUntil };
-          return {
-            kind: 'invalid-code',
-            remainingAttempts: MAX_FAILED_ATTEMPTS - failedAttempts,
-          };
+          if (blockedUntil) return { kind: 'blocked' };
+          return { kind: 'invalid-code' };
         }
 
         await tx.user.update({
@@ -1243,23 +1279,7 @@ export class AuthService {
       },
     );
 
-    if (result.kind === 'invalid-user') {
-      throw new BadRequestException(
-        'Geçersiz veya süresi dolmuş sıfırlama kodu.',
-      );
-    }
-    if (result.kind === 'expired') {
-      throw new BadRequestException('Sıfırlama kodunun süresi dolmuş.');
-    }
-    if (result.kind === 'blocked') {
-      throw this.tooManyRequests(result.blockedUntil);
-    }
-    if (result.kind === 'invalid-code') {
-      throw new BadRequestException({
-        message: 'Geçersiz sıfırlama kodu.',
-        remainingAttempts: result.remainingAttempts,
-      });
-    }
+    if (result.kind !== 'success') throw this.invalidResetCode();
 
     this.locationsGateway.disconnectUser(candidate.id);
     return {
@@ -1270,6 +1290,12 @@ export class AuthService {
 
   private remainingSeconds(expiresAt: Date): number {
     return Math.max(0, Math.ceil((expiresAt.getTime() - Date.now()) / 1000));
+  }
+
+  private invalidResetCode(): BadRequestException {
+    return new BadRequestException(
+      'Geçersiz veya süresi dolmuş sıfırlama kodu.',
+    );
   }
 
   private tooManyRequests(blockedUntil: Date): HttpException {
