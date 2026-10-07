@@ -70,11 +70,7 @@ export class AppLogger implements LoggerService {
       (typeof message === 'string' && message.includes('[CRON]'))
     ) {
       cronLogger.info(text);
-    } else if (
-      context === 'AlertsService' ||
-      context === 'LocationsService' ||
-      context === 'BatteryService'
-    ) {
+    } else if (context === 'AlertsService' || context === 'LocationsService') {
       eventLogger.info({ context, message });
     } else {
       console.log(`[LOG] ${context ? `[${context}] ` : ''}${text}`);

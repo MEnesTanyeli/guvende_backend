@@ -13,7 +13,6 @@
 | Notifications | `src/notifications` | Notification delivery/state. | Push provider details should stay behind service boundary. |
 | SOS | `src/sos` | Emergency alert trigger. | Critical flow. |
 | Medications | `src/medications` | Medication reminders and taken state. | Notification integration may apply. |
-| Battery | `src/battery` | Battery telemetry. | Sensitive operational telemetry. |
 | App Usage | `src/app-usage` | App usage telemetry. | Guardian access must be ownership checked. |
 | Admin | `src/admin` | Operational support and administration. | Requires audit and strict authorization. |
 | Mail | `src/mail` | Brevo email delivery. | External provider, no secret logging. |

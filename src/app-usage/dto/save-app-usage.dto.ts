@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   IsString,
   IsInt,
   IsArray,
@@ -6,6 +7,8 @@ import {
   IsOptional,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+
+export const MAX_APP_USAGE_BATCH_SIZE = 100;
 
 export class AppUsageItemDto {
   @IsString()
@@ -20,6 +23,7 @@ export class AppUsageItemDto {
 
 export class SaveAppUsageDto {
   @IsArray()
+  @ArrayMaxSize(MAX_APP_USAGE_BATCH_SIZE)
   @ValidateNested({ each: true })
   @Type(() => AppUsageItemDto)
   usages!: AppUsageItemDto[];

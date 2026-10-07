@@ -12,7 +12,6 @@ import { FamiliesModule } from './families/families.module';
 import { LocationsModule } from './locations/locations.module';
 import { SafeZonesModule } from './safe-zones/safe-zones.module';
 import { NotificationsModule } from './notifications/notifications.module';
-import { BatteryModule } from './battery/battery.module';
 import { AlertsModule } from './alerts/alerts.module';
 import { SosModule } from './sos/sos.module';
 import { ActivityModule } from './activity/activity.module';
@@ -38,7 +37,6 @@ import { AdminModule } from './admin/admin.module';
     LocationsModule,
     SafeZonesModule,
     NotificationsModule,
-    BatteryModule,
     AlertsModule,
     SosModule,
     ActivityModule,
