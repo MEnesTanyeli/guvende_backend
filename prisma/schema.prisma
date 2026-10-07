@@ -212,6 +212,7 @@ model Location {
 
   @@unique([userId, devicePointId])
   @@index([userId, recordedAt(sort: Desc)])
+  @@index([userId, receivedAt])
   @@map("locations")
 }
 

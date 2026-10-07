@@ -3,7 +3,11 @@ import { Alert, AlertType, MemberType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RecordLocationDto } from './dto/record-location.dto';
 import { advanceGeofence, emptyGeofenceMemory } from './geofence-engine';
-import { isLocationStale } from './location-freshness';
+import {
+  canonicalLocationTimestamp,
+  isLocationStale,
+  isValidLocationTimestamp,
+} from './location-freshness';
 
 function eventMessage(
   name: string,
@@ -38,11 +42,8 @@ export async function saveLocationWithGeofences(
   dto: RecordLocationDto,
 ) {
   const receivedAt = new Date();
-  const recordedAt = new Date(dto.measuredAt || dto.recordedAt || receivedAt);
-  if (
-    !Number.isFinite(recordedAt.getTime()) ||
-    recordedAt.getTime() > Date.now() + 30_000
-  ) {
+  const recordedAt = canonicalLocationTimestamp(dto, receivedAt);
+  if (!isValidLocationTimestamp(recordedAt, receivedAt)) {
     throw new BadRequestException('Konum ölçüm zamanı geçersiz.');
   }
   const isStale = isLocationStale(recordedAt, receivedAt);
@@ -124,7 +125,7 @@ export async function saveLocationWithGeofences(
           accuracy: dto.accuracy,
           speed: dto.speed,
           batteryLevel: dto.batteryLevel,
-          isCharging: dto.isCharging ?? false,
+          isCharging: dto.isCharging ?? null,
           connectionStatus: dto.connectionStatus || 'online',
           movementStatus: dto.movementStatus || 'unknown',
           recordedAt,

@@ -16,24 +16,19 @@ import { SendAudibleWarningDto } from './dto/send-audible-warning.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SubscriptionGuard } from '../auth/guards/subscription.guard';
 import { GetUser } from '../auth/decorators/get-user.decorator';
-import { LocationRateLimitService } from './location-rate-limit.service';
 import { LocationRateLimitFilter } from './location-rate-limit.filter';
 
 @UseGuards(JwtAuthGuard, SubscriptionGuard)
 @UseFilters(LocationRateLimitFilter)
 @Controller()
 export class LocationsController {
-  constructor(
-    private locationsService: LocationsService,
-    private locationRateLimit: LocationRateLimitService,
-  ) {}
+  constructor(private locationsService: LocationsService) {}
 
   @Post('locations')
   async recordLocation(
     @GetUser('id') userId: string,
     @Body() dto: RecordLocationDto,
   ) {
-    this.locationRateLimit.reserve(userId, 1);
     return this.locationsService.recordLocation(userId, dto);
   }
 
@@ -42,7 +37,6 @@ export class LocationsController {
     @GetUser('id') userId: string,
     @Body() dto: RecordBulkLocationsDto,
   ) {
-    this.locationRateLimit.reserve(userId, dto.locations.length);
     return this.locationsService.recordBulkLocations(userId, dto);
   }
 

@@ -25,6 +25,17 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { confirmedZoneName, saveLocationWithGeofences } from './geofence-store';
 import { AckAudibleWarningDto } from './dto/ack-audible-warning.dto';
 import { SubscriptionEntitlementService } from '../common/subscription-entitlement.service';
+import {
+  LocationRateLimitService,
+  LOCATION_RATE_LIMIT,
+} from './location-rate-limit.service';
+import { LocationHardQuotaService } from './location-hard-quota.service';
+import {
+  canonicalLocationTimestamp,
+  isLocationStale,
+  isValidLocationTimestamp,
+  LOCATION_STALE_AFTER_MS,
+} from './location-freshness';
 
 @Injectable()
 export class LocationsService {
@@ -35,6 +46,8 @@ export class LocationsService {
     private locationsGateway: LocationsGateway,
     private notificationsService: NotificationsService,
     private subscriptionEntitlement: SubscriptionEntitlementService,
+    private locationRateLimit: LocationRateLimitService,
+    private locationHardQuota: LocationHardQuotaService,
   ) {}
 
   private getIstanbulDateKey(date = new Date()): string {
@@ -75,9 +88,50 @@ export class LocationsService {
     dto: RecordLocationDto,
     broadcastLocation = true,
   ) {
+    return this.locationRateLimit.withUserLock(userId, async () => {
+      const receivedAt = new Date();
+      const recordedAt = canonicalLocationTimestamp(dto, receivedAt);
+      if (!isValidLocationTimestamp(recordedAt, receivedAt)) {
+        throw new BadRequestException('Konum ölçüm zamanı geçersiz.');
+      }
+
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true },
+      });
+      if (!user) throw new NotFoundException('Kullanıcı bulunamadı.');
+
+      if (dto.devicePointId) {
+        const existing = await this.prisma.location.findUnique({
+          where: {
+            userId_devicePointId: { userId, devicePointId: dto.devicePointId },
+          },
+          include: { user: { select: { id: true, name: true, email: true } } },
+        });
+        if (existing) return existing;
+      }
+
+      await this.locationHardQuota.assertCanCreate(userId, 1, receivedAt);
+      const stale = isLocationStale(recordedAt, receivedAt);
+      this.locationRateLimit.reserveBatch(
+        userId,
+        stale ? 0 : 1,
+        stale ? 1 : 0,
+        receivedAt.getTime(),
+      );
+      const result = await this.persistLocation(userId, dto, broadcastLocation);
+      return result.location;
+    });
+  }
+
+  private async persistLocation(
+    userId: string,
+    dto: RecordLocationDto,
+    broadcastLocation = true,
+  ): Promise<{ location: Location; duplicate: boolean }> {
     const result = await saveLocationWithGeofences(this.prisma, userId, dto);
     const { newLocation, user, trackableMemberships, isStale } = result;
-    if (result.duplicate) return newLocation;
+    if (result.duplicate) return { location: newLocation, duplicate: true };
 
     for (const alert of result.alerts) {
       const metadata = alert.metadata as {
@@ -119,7 +173,7 @@ export class LocationsService {
       });
     }
     // Historical measurements must not mutate today's connection/battery state.
-    if (isStale) return newLocation;
+    if (isStale) return { location: newLocation, duplicate: false };
 
     await this.notificationsService.resolveActiveAlerts(
       userId,
@@ -127,7 +181,7 @@ export class LocationsService {
     );
 
     if (dto.batteryLevel !== undefined) {
-      if (dto.batteryLevel <= 15 && !dto.isCharging) {
+      if (dto.batteryLevel <= 15 && dto.isCharging === false) {
         const alertTitle = 'Dusuk Sarj Uyarisi';
         const alertMsg = `${user.name} adli aile uyesinin sarji %${dto.batteryLevel} seviyesine dustu!`;
 
@@ -148,7 +202,7 @@ export class LocationsService {
           delivery: 'family',
           dedupeActiveByUser: true,
         });
-      } else if (dto.batteryLevel > 15 || dto.isCharging) {
+      } else if (dto.batteryLevel > 15 || dto.isCharging === true) {
         await this.notificationsService.resolveActiveAlerts(
           userId,
           AlertType.low_battery,
@@ -156,10 +210,19 @@ export class LocationsService {
       }
     }
 
-    return newLocation;
+    return { location: newLocation, duplicate: false };
   }
 
   async recordBulkLocations(userId: string, dto: RecordBulkLocationsDto) {
+    return this.locationRateLimit.withUserLock(userId, () =>
+      this.recordBulkLocationsLocked(userId, dto),
+    );
+  }
+
+  private async recordBulkLocationsLocked(
+    userId: string,
+    dto: RecordBulkLocationsDto,
+  ) {
     const { locations } = dto;
     if (locations && locations.length > MAX_BULK_LOCATION_POINTS) {
       throw new BadRequestException(
@@ -197,6 +260,7 @@ export class LocationsService {
     const rejectedItems: Array<{ devicePointId: string; reason: string }> = [];
     let savedLatestLocation: Location | null = null;
 
+    const receivedAt = new Date();
     const validLocations = sortedLocations.filter((loc) => {
       if (!loc.devicePointId) {
         rejectedItems.push({
@@ -206,11 +270,8 @@ export class LocationsService {
         return false;
       }
 
-      const recordedAt = new Date(loc.measuredAt || loc.recordedAt || '');
-      if (
-        !Number.isFinite(recordedAt.getTime()) ||
-        recordedAt.getTime() > Date.now() + 30_000
-      ) {
+      const recordedAt = canonicalLocationTimestamp(loc, receivedAt, false);
+      if (!isValidLocationTimestamp(recordedAt, receivedAt)) {
         rejectedItems.push({
           devicePointId: loc.devicePointId,
           reason: 'invalid_measurement_time',
@@ -220,39 +281,105 @@ export class LocationsService {
       return true;
     });
 
+    const devicePointIds = [
+      ...new Set(validLocations.map((loc) => loc.devicePointId!)),
+    ];
+    const existingLocations = devicePointIds.length
+      ? await this.prisma.location.findMany({
+          where: { userId, devicePointId: { in: devicePointIds } },
+        })
+      : [];
+    const existingById = new Map(
+      existingLocations.map((location) => [location.devicePointId!, location]),
+    );
+
+    // The first valid occurrence for an ID is the one the ordered persistence loop can create.
+    const newCandidates = new Map<string, RecordLocationDto>();
+    for (const location of validLocations) {
+      const id = location.devicePointId!;
+      if (!existingById.has(id) && !newCandidates.has(id)) {
+        newCandidates.set(id, location);
+      }
+    }
+    const candidateLocations = [...newCandidates.values()];
+    const liveCount = candidateLocations.filter(
+      (location) =>
+        !isLocationStale(
+          canonicalLocationTimestamp(location, receivedAt, false),
+          receivedAt,
+        ),
+    ).length;
+    const deferredCount = candidateLocations.length - liveCount;
+    await this.locationHardQuota.assertCanCreate(
+      userId,
+      candidateLocations.length,
+      receivedAt,
+    );
+
+    let oversizedLiveRetryAfterSeconds = 300;
+    if (liveCount > LOCATION_RATE_LIMIT.liveCapacity) {
+      const newestLiveAt = Math.max(
+        ...candidateLocations
+          .filter(
+            (location) =>
+              !isLocationStale(
+                canonicalLocationTimestamp(location, receivedAt, false),
+                receivedAt,
+              ),
+          )
+          .map((location) =>
+            canonicalLocationTimestamp(location, receivedAt, false).getTime(),
+          ),
+      );
+      oversizedLiveRetryAfterSeconds = Math.max(
+        1,
+        Math.ceil(
+          (newestLiveAt + LOCATION_STALE_AFTER_MS + 1 - receivedAt.getTime()) /
+            1000,
+        ),
+      );
+    }
+    this.locationRateLimit.reserveBatch(
+      userId,
+      liveCount,
+      deferredCount,
+      receivedAt.getTime(),
+      oversizedLiveRetryAfterSeconds,
+    );
+
     // Every point goes through the same transaction/state machine, in measurement order.
     for (const loc of validLocations) {
-      const where = {
-        userId_devicePointId: { userId, devicePointId: loc.devicePointId! },
-      };
-      const existing = await this.prisma.location.findUnique({ where });
+      const id = loc.devicePointId!;
+      const existing = existingById.get(id);
       if (existing) {
-        duplicateIds.push(loc.devicePointId!);
+        duplicateIds.push(id);
         savedLatestLocation = existing;
         continue;
       }
+      const where = { userId_devicePointId: { userId, devicePointId: id } };
       try {
         // Only the final valid measurement may broadcast; the store also checks
         // freshness and whether a newer location already exists in the database.
-        savedLatestLocation = await this.recordLocation(
+        const persisted = await this.persistLocation(
           userId,
           loc,
           loc === validLocations[validLocations.length - 1],
         );
-        acceptedIds.push(loc.devicePointId!);
+        savedLatestLocation = persisted.location;
+        existingById.set(id, persisted.location);
+        if (persisted.duplicate) duplicateIds.push(id);
+        else acceptedIds.push(id);
       } catch (error) {
         // Location and geofence event are atomic; a stored row means both committed.
         const saved = await this.prisma.location.findUnique({ where });
         if (saved) {
-          acceptedIds.push(loc.devicePointId!);
+          acceptedIds.push(id);
           savedLatestLocation = saved;
+          existingById.set(id, saved);
         } else {
-          this.logger.error(
-            `Bulk location failed: ${loc.devicePointId}`,
-            error,
-          );
+          this.logger.error(`Bulk location failed: ${id}`, error);
           rejectedItems.push({
-            devicePointId: loc.devicePointId!,
+            devicePointId: id,
             reason: 'storage_error',
           });
           // Do not advance past a failed point: that would discard it as out-of-order on retry.
