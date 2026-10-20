@@ -22,7 +22,6 @@ let AlertsService = class AlertsService {
         this.subscriptionEntitlement = subscriptionEntitlement;
     }
     async findAll(userId, familyId) {
-        await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
         const membership = await this.prisma.familyMember.findUnique({
             where: {
                 familyId_userId: {
@@ -37,9 +36,15 @@ let AlertsService = class AlertsService {
         if (membership.memberType !== client_1.MemberType.guardian) {
             throw new common_1.ForbiddenException('Sadece veliler/koruyucular (guardian) alarmları görüntüleyebilir.');
         }
+        await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
         return this.prisma.alert.findMany({
             where: {
                 familyId,
+                family: {
+                    members: {
+                        some: { userId, memberType: client_1.MemberType.guardian },
+                    },
+                },
             },
             include: {
                 user: {
@@ -55,37 +60,42 @@ let AlertsService = class AlertsService {
         });
     }
     async resolve(userId, alertId) {
-        const alert = await this.prisma.alert.findUnique({
-            where: { id: alertId },
+        const guardianFamilyScope = {
+            members: {
+                some: { userId, memberType: client_1.MemberType.guardian },
+            },
+        };
+        const alert = await this.prisma.alert.findFirst({
+            where: {
+                id: alertId,
+                family: { is: guardianFamilyScope },
+            },
         });
         if (!alert) {
             throw new common_1.NotFoundException('Alarm bulunamadı.');
         }
         await this.subscriptionEntitlement.assertFamilyEntitled(alert.familyId);
-        const membership = await this.prisma.familyMember.findUnique({
-            where: {
-                familyId_userId: {
-                    familyId: alert.familyId,
-                    userId,
+        try {
+            return await this.prisma.alert.update({
+                where: {
+                    id: alertId,
+                    family: { is: guardianFamilyScope },
                 },
-            },
-        });
-        if (!membership) {
-            throw new common_1.ForbiddenException('Bu aile grubunun alarmını çözmeye yetkiniz yok.');
+                data: {
+                    status: client_1.AlertStatus.resolved,
+                    resolvedAt: new Date(),
+                },
+            });
         }
-        if (membership.memberType !== client_1.MemberType.guardian) {
-            throw new common_1.ForbiddenException('Sadece veliler/koruyucular (guardian) alarmları çözebilir.');
+        catch (error) {
+            if (error instanceof client_1.Prisma.PrismaClientKnownRequestError &&
+                error.code === 'P2025') {
+                throw new common_1.NotFoundException('Alarm bulunamadı.');
+            }
+            throw error;
         }
-        return this.prisma.alert.update({
-            where: { id: alertId },
-            data: {
-                status: client_1.AlertStatus.resolved,
-                resolvedAt: new Date(),
-            },
-        });
     }
     async resolveAll(userId, familyId) {
-        await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
         const membership = await this.prisma.familyMember.findUnique({
             where: {
                 familyId_userId: {
@@ -100,10 +110,16 @@ let AlertsService = class AlertsService {
         if (membership.memberType !== client_1.MemberType.guardian) {
             throw new common_1.ForbiddenException('Sadece veliler/koruyucular (guardian) alarmları çözebilir.');
         }
+        await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
         return this.prisma.alert.updateMany({
             where: {
                 familyId,
                 status: client_1.AlertStatus.active,
+                family: {
+                    members: {
+                        some: { userId, memberType: client_1.MemberType.guardian },
+                    },
+                },
             },
             data: {
                 status: client_1.AlertStatus.resolved,

@@ -7,13 +7,35 @@ import { MemberType } from '@prisma/client';
 import { LocationsService } from './locations.service';
 import { LocationsGateway } from './locations.gateway';
 
+function createLocationsService(prisma: any): LocationsService {
+  const subscriptionEntitlement = {
+    assertFamilyEntitled: jest.fn().mockResolvedValue(undefined),
+  };
+  const locationRateLimit = {
+    withUserLock: (_userId: string, operation: () => Promise<unknown>) =>
+      operation(),
+    reserveBatch: jest.fn(),
+  };
+  const locationHardQuota = {
+    assertCanCreate: jest.fn().mockResolvedValue(undefined),
+  };
+  return new LocationsService(
+    prisma,
+    {} as any,
+    {} as any,
+    subscriptionEntitlement as any,
+    locationRateLimit as any,
+    locationHardQuota as any,
+  );
+}
+
 describe('Location and WebSocket isolation', () => {
   it('rejects more than 250 bulk points before touching persistence', async () => {
     const prisma: any = {
       user: { findUnique: jest.fn() },
       location: { findUnique: jest.fn(), create: jest.fn() },
     };
-    const service = new LocationsService(prisma, {} as any, {} as any);
+    const service = createLocationsService(prisma);
     const locations = Array.from({ length: 251 }, (_, index) => ({
       latitude: 41,
       longitude: 29,
@@ -33,7 +55,7 @@ describe('Location and WebSocket isolation', () => {
     const prisma: any = {
       familyMember: { findUnique: jest.fn().mockResolvedValue(null) },
     };
-    const service = new LocationsService(prisma, {} as any, {} as any);
+    const service = createLocationsService(prisma);
     await expect(
       service.getLatestLocations('attacker', 'family-1'),
     ).rejects.toBeInstanceOf(ForbiddenException);
@@ -56,7 +78,7 @@ describe('Location and WebSocket isolation', () => {
       geofenceState: { findFirst: jest.fn().mockResolvedValue(null) },
       location: { findFirst: jest.fn().mockResolvedValue(ownLocation) },
     };
-    const service = new LocationsService(prisma, {} as any, {} as any);
+    const service = createLocationsService(prisma);
     await expect(
       service.getLatestLocations('child', 'family-1'),
     ).resolves.toEqual([{ ...ownLocation, insideZoneName: null }]);
@@ -74,7 +96,7 @@ describe('Location and WebSocket isolation', () => {
           .mockResolvedValueOnce(null),
       },
     };
-    const service = new LocationsService(prisma, {} as any, {} as any);
+    const service = createLocationsService(prisma);
     await expect(
       service.getLocationsHistory('guardian', 'family-1', 'outsider'),
     ).rejects.toBeInstanceOf(NotFoundException);
@@ -86,12 +108,18 @@ describe('Location and WebSocket isolation', () => {
       familyMember: {
         findUnique: jest
           .fn()
-          .mockResolvedValueOnce({ memberType: MemberType.guardian })
-          .mockResolvedValueOnce({ memberType: MemberType.child }),
+          .mockResolvedValueOnce({
+            memberType: MemberType.guardian,
+            createdAt: new Date('2026-09-01T00:00:00Z'),
+          })
+          .mockResolvedValueOnce({
+            memberType: MemberType.child,
+            createdAt: new Date('2026-09-01T00:00:00Z'),
+          }),
       },
       location: { findMany },
     };
-    const service = new LocationsService(prisma, {} as any, {} as any);
+    const service = createLocationsService(prisma);
 
     await service.getLocationsHistory(
       'guardian',
@@ -121,12 +149,18 @@ describe('Location and WebSocket isolation', () => {
           .fn()
           .mockResolvedValueOnce(null)
           .mockResolvedValueOnce({ id: 'stored-2' }),
+        findMany: jest.fn().mockResolvedValue([
+          { id: 'stored-2', userId: 'u1', devicePointId: 'point-2' },
+        ]),
       },
     };
-    const service = new LocationsService(prisma, {} as any, {} as any);
+    const service = createLocationsService(prisma);
     jest
-      .spyOn(service, 'recordLocation')
-      .mockResolvedValue({ id: 'stored-1' } as any);
+      .spyOn(service as any, 'persistLocation')
+      .mockResolvedValue({
+        location: { id: 'stored-1', userId: 'u1', devicePointId: 'point-1' },
+        duplicate: false,
+      });
     const result = await service.recordBulkLocations('u1', {
       locations: [
         {
@@ -155,7 +189,7 @@ describe('Location and WebSocket isolation', () => {
       user: { findUnique: jest.fn().mockResolvedValue({ id: 'u1' }) },
       location: { create: jest.fn(), findUnique: jest.fn() },
     };
-    const service = new LocationsService(prisma, {} as any, {} as any);
+    const service = createLocationsService(prisma);
     const result = await service.recordBulkLocations('u1', {
       locations: [
         {

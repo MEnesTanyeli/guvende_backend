@@ -15,15 +15,26 @@ describe('FamiliesService authorization', () => {
       },
       $transaction: jest.fn(),
     };
+    prisma.$transaction.mockImplementation((callback: any) => callback(prisma));
     const notifications = { raiseFamilyAlert: jest.fn() };
     const offlineSos = { createInitialKey: jest.fn(), rotateKey: jest.fn() };
+    const subscriptionEntitlement = {
+      assertUserEntitled: jest.fn().mockResolvedValue(undefined),
+      assertFamilyEntitled: jest.fn().mockResolvedValue(undefined),
+      isFamilyEntitled: jest.fn().mockResolvedValue(true),
+    };
+    const familyMembershipLock = {
+      lockUserMembership: jest.fn().mockResolvedValue(undefined),
+      lockFamilyMembership: jest.fn().mockResolvedValue(undefined),
+    };
     return {
       prisma,
       notifications,
       offlineSos,
+      subscriptionEntitlement,
       service: new FamiliesService(prisma, notifications as any, {
         revokeFamilyAccess: jest.fn(),
-      } as any, offlineSos as any),
+      } as any, offlineSos as any, subscriptionEntitlement as any, familyMembershipLock as any),
     };
   };
 
@@ -56,11 +67,22 @@ describe('FamiliesService authorization', () => {
     prisma.family.findFirst.mockResolvedValue(null);
     prisma.familyMember.count.mockResolvedValue(0);
     const tx = {
+      user: {
+        findUnique: jest.fn().mockResolvedValue({
+          role: MemberType.guardian,
+          proxyId: null,
+          proxy: null,
+        }),
+      },
       family: {
+        findFirst: jest.fn().mockResolvedValue(null),
         findUnique: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue({ id: 'f1' }),
       },
-      familyMember: { create: jest.fn().mockResolvedValue({}) },
+      familyMember: {
+        count: jest.fn().mockResolvedValue(0),
+        create: jest.fn().mockResolvedValue({}),
+      },
     };
     prisma.$transaction.mockImplementation((callback: any) => callback(tx));
     await service.create('u1', { name: 'Ailem' });
@@ -90,8 +112,13 @@ describe('FamiliesService authorization', () => {
     await expect(
       service.join('u1', { inviteCode: 'CODE' }),
     ).rejects.toBeInstanceOf(ConflictException);
-    expect(prisma.family.findUnique).toHaveBeenCalledWith({
+    expect(prisma.family.findUnique).toHaveBeenNthCalledWith(1, {
       where: { inviteCode: 'CODE' },
+      select: { id: true },
+    });
+    expect(prisma.family.findUnique).toHaveBeenNthCalledWith(2, {
+      where: { inviteCode: 'CODE' },
+      select: { id: true },
     });
   });
 
@@ -124,7 +151,10 @@ describe('FamiliesService authorization', () => {
     });
     const tx = {
       geofenceState: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
-      familyMember: { delete: jest.fn().mockResolvedValue({}) },
+      familyMember: {
+        findUnique: jest.fn().mockResolvedValue({ memberType: MemberType.child }),
+        delete: jest.fn().mockResolvedValue({}),
+      },
     };
     prisma.$transaction.mockImplementation((callback: any) => callback(tx));
 
@@ -138,13 +168,33 @@ describe('FamiliesService authorization', () => {
 
   it('cleans the removed members family-scoped geofence states in the same transaction', async () => {
     const { prisma, service } = setup();
-    prisma.familyMember.findUnique
-      .mockResolvedValueOnce({ memberType: MemberType.guardian })
-      .mockResolvedValueOnce({ userId: 'target', memberType: MemberType.guardian, user: { name: 'Target' } });
-    prisma.family.findUnique.mockResolvedValue({ ownerId: 'owner' });
+    prisma.familyMember.findUnique.mockResolvedValue({
+      userId: 'target',
+      memberType: MemberType.guardian,
+      user: { name: 'Target' },
+    });
+    prisma.family.findUnique.mockResolvedValue({
+      ownerId: 'guardian',
+      owner: { proxyId: null },
+    });
     const tx = {
+      user: {
+        findUnique: jest.fn().mockResolvedValue({ role: 'guardian', proxyId: null }),
+      },
+      family: {
+        findUnique: jest.fn().mockResolvedValue({
+          ownerId: 'guardian',
+          owner: { proxyId: null },
+        }),
+      },
       geofenceState: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
-      familyMember: { delete: jest.fn().mockResolvedValue({}) },
+      familyMember: {
+        findUnique: jest.fn().mockResolvedValue({ memberType: MemberType.guardian }),
+        delete: jest.fn().mockResolvedValue({}),
+      },
+      guardianTrackingInterval: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
     };
     prisma.$transaction.mockImplementation((callback: any) => callback(tx));
 

@@ -18,6 +18,7 @@ const locations_gateway_1 = require("../locations/locations.gateway");
 const crypto_1 = require("crypto");
 const offline_sos_service_1 = require("../offline-sos/offline-sos.service");
 const subscription_entitlement_service_1 = require("../common/subscription-entitlement.service");
+const family_membership_lock_service_1 = require("../common/family-membership-lock.service");
 const INVITE_CODE_WRITE_MAX_RETRIES = 3;
 let FamiliesService = class FamiliesService {
     prisma;
@@ -25,13 +26,15 @@ let FamiliesService = class FamiliesService {
     locationsGateway;
     offlineSosService;
     subscriptionEntitlement;
+    familyMembershipLock;
     inviteCodeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    constructor(prisma, notificationsService, locationsGateway, offlineSosService, subscriptionEntitlement) {
+    constructor(prisma, notificationsService, locationsGateway, offlineSosService, subscriptionEntitlement, familyMembershipLock = new family_membership_lock_service_1.FamilyMembershipLockService()) {
         this.prisma = prisma;
         this.notificationsService = notificationsService;
         this.locationsGateway = locationsGateway;
         this.offlineSosService = offlineSosService;
         this.subscriptionEntitlement = subscriptionEntitlement;
+        this.familyMembershipLock = familyMembershipLock;
     }
     createInviteCode(length = 8) {
         let code = '';
@@ -44,15 +47,9 @@ let FamiliesService = class FamiliesService {
     createSosEncryptionKey() {
         return (0, crypto_1.randomBytes)(32).toString('base64url');
     }
-    async lockUserMembership(tx, userId) {
-        await tx.$executeRaw `SELECT pg_advisory_xact_lock(hashtextextended(${`family-membership-user:${userId}`}, 0))`;
-    }
-    async lockFamilyMembership(tx, familyId) {
-        await tx.$executeRaw `SELECT pg_advisory_xact_lock(hashtextextended(${`family-membership-family:${familyId}`}, 0))`;
-    }
     async dissolveOwnedFamily(userId, familyId) {
         const memberUserIds = await this.prisma.$transaction(async (tx) => {
-            await this.lockFamilyMembership(tx, familyId);
+            await this.familyMembershipLock.lockFamilyMembership(tx, familyId);
             const family = await tx.family.findUnique({
                 where: { id: familyId },
                 select: {
@@ -115,7 +112,7 @@ let FamiliesService = class FamiliesService {
     async create(userId, dto) {
         await this.subscriptionEntitlement.assertUserEntitled(userId);
         return this.retryInviteCodeWrite(() => this.prisma.$transaction(async (tx) => {
-            await this.lockUserMembership(tx, userId);
+            await this.familyMembershipLock.lockUserMembership(tx, userId);
             const user = await tx.user.findUnique({
                 where: { id: userId },
                 select: {
@@ -230,7 +227,8 @@ let FamiliesService = class FamiliesService {
         return families.map((family) => {
             if (family.ownerId === userId)
                 return family;
-            const { inviteCode: _inviteCode, ...safeFamily } = family;
+            const { inviteCode, ...safeFamily } = family;
+            void inviteCode;
             return safeFamily;
         });
     }
@@ -250,6 +248,8 @@ let FamiliesService = class FamiliesService {
             throw new common_1.ForbiddenException('Bu aile grubunun verilerine erişim izniniz yok.');
         }
         const requesterIsGuardian = isMember.memberType === client_1.MemberType.guardian;
+        const familyHasSafeZoneEntitlement = requesterIsGuardian &&
+            (await this.subscriptionEntitlement.isFamilyEntitled(familyId));
         const family = await this.prisma.family.findUnique({
             where: { id: familyId },
             select: {
@@ -281,7 +281,7 @@ let FamiliesService = class FamiliesService {
                         },
                     },
                 },
-                ...(requesterIsGuardian ? { safeZones: true } : {}),
+                ...(familyHasSafeZoneEntitlement ? { safeZones: true } : {}),
             },
         });
         if (!family) {
@@ -312,10 +312,17 @@ let FamiliesService = class FamiliesService {
                     : {}),
             };
         });
-        const safeFamily = { ...family, members };
+        const safeFamily = {
+            ...family,
+            members,
+            ...(requesterIsGuardian && !familyHasSafeZoneEntitlement
+                ? { safeZones: [] }
+                : {}),
+        };
         if (family.ownerId === userId)
             return safeFamily;
-        const { inviteCode: _inviteCode, ...nonOwnerFamily } = safeFamily;
+        const { inviteCode, ...nonOwnerFamily } = safeFamily;
+        void inviteCode;
         return nonOwnerFamily;
     }
     async invite(userId, familyId) {
@@ -370,7 +377,7 @@ let FamiliesService = class FamiliesService {
     }
     async rotateInviteCode(userId, familyId) {
         return this.retryInviteCodeWrite(() => this.prisma.$transaction(async (tx) => {
-            await this.lockFamilyMembership(tx, familyId);
+            await this.familyMembershipLock.lockFamilyMembership(tx, familyId);
             const family = await tx.family.findUnique({
                 where: { id: familyId },
                 select: { ownerId: true },
@@ -399,8 +406,8 @@ let FamiliesService = class FamiliesService {
             if (!initialFamily) {
                 throw new common_1.NotFoundException('Geçersiz aile davet kodu.');
             }
-            await this.lockUserMembership(tx, userId);
-            await this.lockFamilyMembership(tx, initialFamily.id);
+            await this.familyMembershipLock.lockUserMembership(tx, userId);
+            await this.familyMembershipLock.lockFamilyMembership(tx, initialFamily.id);
             const family = await tx.family.findUnique({
                 where: { inviteCode },
                 select: { id: true },
@@ -510,13 +517,21 @@ let FamiliesService = class FamiliesService {
             });
         }
         await this.prisma.$transaction(async (tx) => {
+            await this.familyMembershipLock.lockFamilyMembership(tx, familyId);
+            const currentMembership = await tx.familyMember.findUnique({
+                where: { familyId_userId: { familyId, userId } },
+                select: { memberType: true },
+            });
+            if (!currentMembership) {
+                throw new common_1.NotFoundException('Bu aile grubunun üyesi değilsiniz.');
+            }
             await tx.geofenceState.deleteMany({
                 where: { userId, safeZone: { familyId } },
             });
             await tx.familyMember.delete({
                 where: { familyId_userId: { familyId, userId } },
             });
-            if (membership.memberType === client_1.MemberType.guardian) {
+            if (currentMembership.memberType === client_1.MemberType.guardian) {
                 await tx.guardianTrackingInterval.updateMany({
                     where: { familyId, guardianUserId: userId, endedAt: null },
                     data: { endedAt: new Date() },
@@ -573,13 +588,42 @@ let FamiliesService = class FamiliesService {
             });
         }
         await this.prisma.$transaction(async (tx) => {
+            await this.familyMembershipLock.lockFamilyMembership(tx, familyId);
+            const lockedFamily = await tx.family.findUnique({
+                where: { id: familyId },
+                select: { ownerId: true, owner: { select: { proxyId: true } } },
+            });
+            if (!lockedFamily) {
+                throw new common_1.NotFoundException('Aile grubu bulunamadı.');
+            }
+            if (lockedFamily.ownerId !== userId) {
+                throw new common_1.ForbiddenException('Sadece aile sahibi gruptan üye çıkarabilir.');
+            }
+            const lockedTargetMembership = await tx.familyMember.findUnique({
+                where: {
+                    familyId_userId: { familyId, userId: targetUserId },
+                },
+                select: { memberType: true },
+            });
+            if (!lockedTargetMembership) {
+                throw new common_1.NotFoundException('Çıkarılmak istenen üye bu aile grubunda bulunamadı.');
+            }
+            if (lockedFamily.ownerId === targetUserId) {
+                throw new common_1.ForbiddenException('Grup kurucusu/sahibi gruptan çıkarılamaz.');
+            }
+            if (userId === targetUserId) {
+                throw new common_1.ForbiddenException('Kendinizi gruptan çıkaramazsınız. Gruptan ayrılmak için "Ayrıl" özelliğini kullanın.');
+            }
+            if (lockedFamily.owner.proxyId === targetUserId) {
+                throw new common_1.ConflictException('Mevcut vekil normal üye çıkarma işlemiyle kaldırılamaz. Vekalet işlemlerindeki "Vekili Kaldır" seçeneğini kullanın.');
+            }
             await tx.geofenceState.deleteMany({
                 where: { userId: targetUserId, safeZone: { familyId } },
             });
             await tx.familyMember.delete({
                 where: { familyId_userId: { familyId, userId: targetUserId } },
             });
-            if (targetMembership.memberType === client_1.MemberType.guardian) {
+            if (lockedTargetMembership.memberType === client_1.MemberType.guardian) {
                 await tx.guardianTrackingInterval.updateMany({
                     where: {
                         familyId,
@@ -685,6 +729,7 @@ exports.FamiliesService = FamiliesService = __decorate([
         notifications_service_1.NotificationsService,
         locations_gateway_1.LocationsGateway,
         offline_sos_service_1.OfflineSosService,
-        subscription_entitlement_service_1.SubscriptionEntitlementService])
+        subscription_entitlement_service_1.SubscriptionEntitlementService,
+        family_membership_lock_service_1.FamilyMembershipLockService])
 ], FamiliesService);
 //# sourceMappingURL=families.service.js.map

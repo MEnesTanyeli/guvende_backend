@@ -2,11 +2,13 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { LocationsGateway } from '../locations/locations.gateway';
 import { OfflineSosService } from '../offline-sos/offline-sos.service';
+import { FamilyMembershipLockService } from '../common/family-membership-lock.service';
 export declare class UsersService {
     private prisma;
     private locationsGateway;
     private offlineSosService;
-    constructor(prisma: PrismaService, locationsGateway: LocationsGateway, offlineSosService: OfflineSosService);
+    private familyMembershipLock;
+    constructor(prisma: PrismaService, locationsGateway: LocationsGateway, offlineSosService: OfflineSosService, familyMembershipLock?: FamilyMembershipLockService);
     private lockProxyMutation;
     accountDeletionInfo(userId: string): Promise<{
         ownsFamilies: boolean;

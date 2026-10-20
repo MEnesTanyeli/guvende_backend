@@ -139,14 +139,6 @@ export declare class AuthController {
     }>;
     forgotPassword(dto: ForgotPasswordDto): Promise<{
         message: string;
-        codeSent?: undefined;
-        expiresAt?: undefined;
-        remainingSeconds?: undefined;
-    } | {
-        message: string;
-        codeSent: boolean;
-        expiresAt: Date;
-        remainingSeconds: number;
     }>;
     resetPassword(dto: ResetPasswordDto): Promise<{
         message: string;

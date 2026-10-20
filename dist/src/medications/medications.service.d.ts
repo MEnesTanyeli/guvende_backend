@@ -4,12 +4,17 @@ import { UpdateMedicationDto } from './dto/update-medication.dto';
 import { UsersService } from '../users/users.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SubscriptionEntitlementService } from '../common/subscription-entitlement.service';
+import { FamilyMembershipLockService } from '../common/family-membership-lock.service';
 export declare class MedicationsService {
     private prisma;
     private usersService;
     private notificationsService;
     private subscriptionEntitlement;
-    constructor(prisma: PrismaService, usersService: UsersService, notificationsService: NotificationsService, subscriptionEntitlement: SubscriptionEntitlementService);
+    private familyMembershipLock;
+    constructor(prisma: PrismaService, usersService: UsersService, notificationsService: NotificationsService, subscriptionEntitlement: SubscriptionEntitlementService, familyMembershipLock?: FamilyMembershipLockService);
+    private findAuthorizationFamilyIds;
+    private lockAndFindAuthorizationFamily;
+    private assertChildOrElderUser;
     createReminder(creatorId: string, dto: CreateMedicationDto): Promise<{
         id: string;
         createdAt: Date;

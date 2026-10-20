@@ -54,18 +54,23 @@ const prisma_service_1 = require("../prisma/prisma.service");
 const users_service_1 = require("../users/users.service");
 const mail_service_1 = require("../mail/mail.service");
 const locations_gateway_1 = require("../locations/locations.gateway");
+const login_attempt_service_1 = require("./login-attempt.service");
+const login_email_1 = require("./login-email");
+const logger_1 = require("../common/logger");
 let AuthService = class AuthService {
     prisma;
     jwtService;
     usersService;
     mailService;
     locationsGateway;
-    constructor(prisma, jwtService, usersService, mailService, locationsGateway) {
+    loginAttemptService;
+    constructor(prisma, jwtService, usersService, mailService, locationsGateway, loginAttemptService) {
         this.prisma = prisma;
         this.jwtService = jwtService;
         this.usersService = usersService;
         this.mailService = mailService;
         this.locationsGateway = locationsGateway;
+        this.loginAttemptService = loginAttemptService;
     }
     async sendVerificationCode(email) {
         const cleanedEmail = email.toLowerCase().trim();
@@ -261,65 +266,75 @@ let AuthService = class AuthService {
         };
     }
     async login(dto, requiredRole) {
-        const user = await this.prisma.user.findUnique({
-            where: { email: dto.email.toLowerCase() },
-            include: {
-                memberships: true,
-            },
-        });
-        if (!user) {
-            throw new common_1.UnauthorizedException('E-posta veya şifre hatalı.');
-        }
-        const isPasswordValid = await bcrypt.compare(dto.password, user.passwordHash);
-        if (!isPasswordValid) {
-            throw new common_1.UnauthorizedException('E-posta veya şifre hatalı.');
-        }
-        if (requiredRole && user.role !== requiredRole) {
-            throw new common_1.ForbiddenException('Bu hesap yönetim paneline erişemez.');
-        }
-        let tokens;
-        if (user.role === 'child' || user.role === 'elder') {
-            if (!dto.deviceId) {
-                throw new common_1.BadRequestException('Bu hesap için cihaz kimliği doğrulaması gereklidir.');
+        const normalizedEmail = (0, login_email_1.normalizeLoginEmail)(dto.email);
+        const reservation = this.loginAttemptService.reserve(normalizedEmail);
+        try {
+            const user = await this.prisma.user.findUnique({
+                where: { email: normalizedEmail },
+                include: {
+                    memberships: true,
+                },
+            });
+            if (!user) {
+                this.loginAttemptService.commitFailure(reservation);
+                throw new common_1.UnauthorizedException('E-posta veya şifre hatalı.');
             }
-            tokens = await this.withUserSessionSecurityLock(user.id, async (tx) => {
-                const currentDeviceState = await tx.user.findUnique({
-                    where: { id: user.id },
-                    select: {
-                        deviceId: true,
-                        deviceLoginBlocked: true,
-                    },
-                });
-                if (!currentDeviceState) {
-                    throw new common_1.UnauthorizedException('Kullanıcı bulunamadı.');
+            const isPasswordValid = await bcrypt.compare(dto.password, user.passwordHash);
+            if (!isPasswordValid) {
+                this.loginAttemptService.commitFailure(reservation);
+                throw new common_1.UnauthorizedException('E-posta veya şifre hatalı.');
+            }
+            this.loginAttemptService.release(reservation);
+            if (requiredRole && user.role !== requiredRole) {
+                throw new common_1.ForbiddenException('Bu hesap yönetim paneline erişemez.');
+            }
+            let tokens;
+            if (user.role === 'child' || user.role === 'elder') {
+                if (!dto.deviceId) {
+                    throw new common_1.BadRequestException('Bu hesap için cihaz kimliği doğrulaması gereklidir.');
                 }
-                if (currentDeviceState.deviceLoginBlocked) {
-                    throw new common_1.UnauthorizedException('Bu hesap veli onayıyla kapatılmıştır. Yeniden giriş için aile sahibinin cihazı sıfırlaması gerekir.');
-                }
-                if (!currentDeviceState.deviceId) {
-                    await tx.user.update({
+                tokens = await this.withUserSessionSecurityLock(user.id, async (tx) => {
+                    const currentDeviceState = await tx.user.findUnique({
                         where: { id: user.id },
-                        data: {
-                            deviceId: dto.deviceId,
-                            loginAllowed: false,
+                        select: {
+                            deviceId: true,
+                            deviceLoginBlocked: true,
                         },
                     });
-                }
-                else if (currentDeviceState.deviceId !== dto.deviceId) {
-                    throw new common_1.UnauthorizedException('Bu hesap başka bir cihaza kilitlenmiştir. Yeni cihazdan giriş yapmak için velinizin onay vermesi gerekmektedir.');
-                }
-                return this.createSessionInTransaction(tx, user.id, user.email, dto.deviceId);
-            });
+                    if (!currentDeviceState) {
+                        throw new common_1.UnauthorizedException('Kullanıcı bulunamadı.');
+                    }
+                    if (currentDeviceState.deviceLoginBlocked) {
+                        throw new common_1.UnauthorizedException('Bu hesap veli onayıyla kapatılmıştır. Yeniden giriş için aile sahibinin cihazı sıfırlaması gerekir.');
+                    }
+                    if (!currentDeviceState.deviceId) {
+                        await tx.user.update({
+                            where: { id: user.id },
+                            data: {
+                                deviceId: dto.deviceId,
+                                loginAllowed: false,
+                            },
+                        });
+                    }
+                    else if (currentDeviceState.deviceId !== dto.deviceId) {
+                        throw new common_1.UnauthorizedException('Bu hesap başka bir cihaza kilitlenmiştir. Yeni cihazdan giriş yapmak için velinizin onay vermesi gerekmektedir.');
+                    }
+                    return this.createSessionInTransaction(tx, user.id, user.email, dto.deviceId);
+                });
+            }
+            else {
+                tokens = await this.createSession(user.id, user.email, dto.deviceId);
+            }
+            const userProfile = await this.usersService.findOne(user.id);
+            return {
+                message: 'Giriş başarılı.',
+                ...tokens,
+                user: userProfile,
+            };
         }
-        else {
-            tokens = await this.createSession(user.id, user.email, dto.deviceId);
+        finally {
+            this.loginAttemptService.release(reservation);
         }
-        const userProfile = await this.usersService.findOne(user.id);
-        return {
-            message: 'Giriş başarılı.',
-            ...tokens,
-            user: userProfile,
-        };
     }
     async adminLogin(dto) {
         return this.login(dto, 'admin');
@@ -385,7 +400,7 @@ let AuthService = class AuthService {
                     where: { id: session.id, revokedAt: null },
                     data: { revokedAt: now },
                 });
-                return { kind: 'expired' };
+                return { kind: 'expired', sessionIds: [session.id] };
             }
             const nextRefreshToken = (0, crypto_1.randomBytes)(48).toString('base64url');
             const nextTokenHash = this.hashRefreshToken(nextRefreshToken);
@@ -399,7 +414,7 @@ let AuthService = class AuthService {
                 },
             });
             if (claimed.count !== 1) {
-                return { kind: 'revoked' };
+                return { kind: 'revoked', sessionIds: [session.id] };
             }
             const nextSession = await tx.session.create({
                 data: {
@@ -414,12 +429,29 @@ let AuthService = class AuthService {
             return {
                 kind: 'rotated',
                 sessionId: nextSession.id,
+                revokedSessionId: session.id,
                 userId: session.user.id,
                 email: session.user.email,
                 refreshToken: nextRefreshToken,
                 refreshTokenExpiresAt,
             };
         });
+        const sessionIdsToDisconnect = result.kind === 'rotated'
+            ? [result.revokedSessionId]
+            : result.kind === 'expired' ||
+                result.kind === 'revoked' ||
+                result.kind === 'grace' ||
+                result.kind === 'reuse-revoked'
+                ? result.sessionIds
+                : [];
+        if (sessionIdsToDisconnect.length > 0) {
+            try {
+                this.locationsGateway.disconnectSessions(candidate.userId, sessionIdsToDisconnect);
+            }
+            catch {
+                logger_1.errorLogger.error('Refresh session socket disconnect failed');
+            }
+        }
         if (result.kind === 'invalid') {
             throw new common_1.UnauthorizedException('Geçersiz refresh token.');
         }
@@ -434,7 +466,7 @@ let AuthService = class AuthService {
                 retryAfterMs: result.retryAfterMs,
             });
         }
-        if (result.kind === 'revoked') {
+        if (result.kind === 'revoked' || result.kind === 'reuse-revoked') {
             throw new common_1.UnauthorizedException('Bu refresh token daha önce kullanılmış veya iptal edilmiş.');
         }
         const accessToken = this.generateAccessToken(result.userId, result.email, result.sessionId);
@@ -766,8 +798,16 @@ let AuthService = class AuthService {
                 return {
                     kind: 'grace',
                     retryAfterMs: Math.max(0, REFRESH_REUSE_GRACE_MS - elapsedMs),
+                    sessionIds: [session.id],
                 };
             }
+            const tokenFamilySessions = await tx.session.findMany({
+                where: {
+                    userId: session.userId,
+                    tokenFamilyId: session.tokenFamilyId,
+                },
+                select: { id: true },
+            });
             await tx.session.updateMany({
                 where: {
                     userId: session.userId,
@@ -776,8 +816,12 @@ let AuthService = class AuthService {
                 },
                 data: { revokedAt: now },
             });
+            return {
+                kind: 'reuse-revoked',
+                sessionIds: tokenFamilySessions.map((familySession) => familySession.id),
+            };
         }
-        return { kind: 'revoked' };
+        return { kind: 'revoked', sessionIds: [session.id] };
     }
     async withUserSessionSecurityLock(userId, operation) {
         return this.prisma.$transaction(async (tx) => {
@@ -794,6 +838,11 @@ let AuthService = class AuthService {
     hashRefreshToken(token) {
         return (0, crypto_1.createHash)('sha256').update(token).digest('hex');
     }
+    forgotPasswordResponse() {
+        return {
+            message: 'Eğer bu e-posta adresiyle kayıtlı bir hesap varsa, şifre sıfırlama talimatları gönderilecektir.',
+        };
+    }
     async forgotPassword(email) {
         const cleanedEmail = email.toLowerCase().trim();
         const candidate = await this.prisma.user.findUnique({
@@ -801,7 +850,7 @@ let AuthService = class AuthService {
             select: { id: true },
         });
         if (!candidate) {
-            return { message: 'E-posta kayıtlıysa şifre sıfırlama kodu gönderildi.' };
+            return this.forgotPasswordResponse();
         }
         const prepared = await this.withUserSessionSecurityLock(candidate.id, async (tx) => {
             const user = await tx.user.findUnique({
@@ -881,36 +930,19 @@ let AuthService = class AuthService {
                 expiresAt,
             };
         });
-        if (prepared.kind === 'missing') {
-            return { message: 'E-posta kayıtlıysa şifre sıfırlama kodu gönderildi.' };
+        if (prepared.kind === 'send') {
+            try {
+                await this.mailService.sendResetPasswordEmail(prepared.email, prepared.code);
+            }
+            catch {
+                await this.prisma.user.updateMany({
+                    where: { id: prepared.userId, resetOtpCode: prepared.codeHash },
+                    data: { resetOtpExpiresAt: new Date() },
+                });
+                logger_1.errorLogger.error('Forgot-password email delivery failed');
+            }
         }
-        if (prepared.kind === 'blocked') {
-            throw this.tooManyRequests(prepared.blockedUntil);
-        }
-        if (prepared.kind === 'existing') {
-            return {
-                message: 'Mevcut şifre sıfırlama kodunuz hâlâ geçerli.',
-                codeSent: false,
-                expiresAt: prepared.expiresAt,
-                remainingSeconds: this.remainingSeconds(prepared.expiresAt),
-            };
-        }
-        try {
-            await this.mailService.sendResetPasswordEmail(prepared.email, prepared.code);
-        }
-        catch (error) {
-            await this.prisma.user.updateMany({
-                where: { id: prepared.userId, resetOtpCode: prepared.codeHash },
-                data: { resetOtpExpiresAt: new Date() },
-            });
-            throw error;
-        }
-        return {
-            message: 'Şifre sıfırlama kodu e-posta adresinize gönderildi.',
-            codeSent: true,
-            expiresAt: prepared.expiresAt,
-            remainingSeconds: this.remainingSeconds(prepared.expiresAt),
-        };
+        return this.forgotPasswordResponse();
     }
     async resetPassword(dto) {
         const candidate = await this.prisma.user.findUnique({
@@ -918,7 +950,7 @@ let AuthService = class AuthService {
             select: { id: true },
         });
         if (!candidate) {
-            throw new common_1.BadRequestException('Geçersiz veya süresi dolmuş sıfırlama kodu.');
+            throw this.invalidResetCode();
         }
         const passwordHash = await bcrypt.hash(dto.newPassword, 10);
         const result = await this.withUserSessionSecurityLock(candidate.id, async (tx) => {
@@ -936,10 +968,7 @@ let AuthService = class AuthService {
                 return { kind: 'invalid-user' };
             const now = new Date();
             if (user.resetOtpBlockedUntil && user.resetOtpBlockedUntil > now) {
-                return {
-                    kind: 'blocked',
-                    blockedUntil: user.resetOtpBlockedUntil,
-                };
+                return { kind: 'blocked' };
             }
             if (!user.resetOtpCode ||
                 !user.resetOtpExpiresAt ||
@@ -960,11 +989,8 @@ let AuthService = class AuthService {
                     },
                 });
                 if (blockedUntil)
-                    return { kind: 'blocked', blockedUntil };
-                return {
-                    kind: 'invalid-code',
-                    remainingAttempts: MAX_FAILED_ATTEMPTS - failedAttempts,
-                };
+                    return { kind: 'blocked' };
+                return { kind: 'invalid-code' };
             }
             await tx.user.update({
                 where: { id: user.id },
@@ -982,21 +1008,8 @@ let AuthService = class AuthService {
             });
             return { kind: 'success' };
         });
-        if (result.kind === 'invalid-user') {
-            throw new common_1.BadRequestException('Geçersiz veya süresi dolmuş sıfırlama kodu.');
-        }
-        if (result.kind === 'expired') {
-            throw new common_1.BadRequestException('Sıfırlama kodunun süresi dolmuş.');
-        }
-        if (result.kind === 'blocked') {
-            throw this.tooManyRequests(result.blockedUntil);
-        }
-        if (result.kind === 'invalid-code') {
-            throw new common_1.BadRequestException({
-                message: 'Geçersiz sıfırlama kodu.',
-                remainingAttempts: result.remainingAttempts,
-            });
-        }
+        if (result.kind !== 'success')
+            throw this.invalidResetCode();
         this.locationsGateway.disconnectUser(candidate.id);
         return {
             message: 'Şifreniz başarıyla sıfırlandı. Yeni şifrenizle giriş yapabilirsiniz.',
@@ -1004,6 +1017,9 @@ let AuthService = class AuthService {
     }
     remainingSeconds(expiresAt) {
         return Math.max(0, Math.ceil((expiresAt.getTime() - Date.now()) / 1000));
+    }
+    invalidResetCode() {
+        return new common_1.BadRequestException('Geçersiz veya süresi dolmuş sıfırlama kodu.');
     }
     tooManyRequests(blockedUntil) {
         return new common_1.HttpException({
@@ -1022,7 +1038,8 @@ exports.AuthService = AuthService = __decorate([
         jwt_1.JwtService,
         users_service_1.UsersService,
         mail_service_1.MailService,
-        locations_gateway_1.LocationsGateway])
+        locations_gateway_1.LocationsGateway,
+        login_attempt_service_1.LoginAttemptService])
 ], AuthService);
 const OTP_TTL_MS = 3 * 60 * 1000;
 const OTP_BLOCK_MS = 15 * 60 * 1000;

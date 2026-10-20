@@ -10,23 +10,35 @@ const guardian = (id: string, proxyId: string | null = null) => ({
 describe('UsersService proxy authorization', () => {
   const setup = () => {
     const prisma: any = {
-      user: { findUnique: jest.fn(), update: jest.fn() },
+      user: {
+        findUnique: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       family: { findMany: jest.fn() },
       familyMember: {
         findUnique: jest.fn(),
         create: jest.fn(),
         deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
+      guardianTrackingInterval: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       geofenceState: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      $executeRaw: jest.fn().mockResolvedValue(1),
       $transaction: jest.fn(),
     };
     prisma.$transaction.mockImplementation(async (callback: any) =>
       callback(prisma),
     );
     const locationsGateway = { revokeFamilyAccess: jest.fn() };
+    const familyMembershipLock = {
+      lockUserMembership: jest.fn().mockResolvedValue(undefined),
+      lockFamilyMembership: jest.fn().mockResolvedValue(undefined),
+    };
     const service = new UsersService(prisma, locationsGateway as any, {
       rotateKey: jest.fn(),
-    } as any);
+    } as any, familyMembershipLock as any);
     jest.spyOn(service, 'findOne').mockResolvedValue({ id: 'owner' } as any);
     return { prisma, service, locationsGateway };
   };
@@ -175,8 +187,8 @@ describe('UsersService proxy authorization', () => {
     expect(prisma.geofenceState.deleteMany).toHaveBeenCalledWith({
       where: { userId: 'target', safeZone: { familyId: 'family-1' } },
     });
-    expect(prisma.user.update).toHaveBeenCalledWith({
-      where: { id: 'owner' },
+    expect(prisma.user.updateMany).toHaveBeenCalledWith({
+      where: { id: 'owner', proxyId: 'target' },
       data: { proxyId: null },
     });
     expect(locationsGateway.revokeFamilyAccess).toHaveBeenCalledWith(

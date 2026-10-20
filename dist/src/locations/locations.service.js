@@ -18,17 +18,24 @@ const client_1 = require("@prisma/client");
 const notifications_service_1 = require("../notifications/notifications.service");
 const geofence_store_1 = require("./geofence-store");
 const subscription_entitlement_service_1 = require("../common/subscription-entitlement.service");
+const location_rate_limit_service_1 = require("./location-rate-limit.service");
+const location_hard_quota_service_1 = require("./location-hard-quota.service");
+const location_freshness_1 = require("./location-freshness");
 let LocationsService = class LocationsService {
     prisma;
     locationsGateway;
     notificationsService;
     subscriptionEntitlement;
+    locationRateLimit;
+    locationHardQuota;
     logger = new common_1.Logger('LocationsService');
-    constructor(prisma, locationsGateway, notificationsService, subscriptionEntitlement) {
+    constructor(prisma, locationsGateway, notificationsService, subscriptionEntitlement, locationRateLimit, locationHardQuota) {
         this.prisma = prisma;
         this.locationsGateway = locationsGateway;
         this.notificationsService = notificationsService;
         this.subscriptionEntitlement = subscriptionEntitlement;
+        this.locationRateLimit = locationRateLimit;
+        this.locationHardQuota = locationHardQuota;
     }
     getIstanbulDateKey(date = new Date()) {
         const parts = new Intl.DateTimeFormat('en-CA', {
@@ -55,10 +62,40 @@ let LocationsService = class LocationsService {
         };
     }
     async recordLocation(userId, dto, broadcastLocation = true) {
+        return this.locationRateLimit.withUserLock(userId, async () => {
+            const receivedAt = new Date();
+            const recordedAt = (0, location_freshness_1.canonicalLocationTimestamp)(dto, receivedAt);
+            if (!(0, location_freshness_1.isValidLocationTimestamp)(recordedAt, receivedAt)) {
+                throw new common_1.BadRequestException('Konum ölçüm zamanı geçersiz.');
+            }
+            const user = await this.prisma.user.findUnique({
+                where: { id: userId },
+                select: { id: true },
+            });
+            if (!user)
+                throw new common_1.NotFoundException('Kullanıcı bulunamadı.');
+            if (dto.devicePointId) {
+                const existing = await this.prisma.location.findUnique({
+                    where: {
+                        userId_devicePointId: { userId, devicePointId: dto.devicePointId },
+                    },
+                    include: { user: { select: { id: true, name: true, email: true } } },
+                });
+                if (existing)
+                    return existing;
+            }
+            await this.locationHardQuota.assertCanCreate(userId, 1, receivedAt);
+            const stale = (0, location_freshness_1.isLocationStale)(recordedAt, receivedAt);
+            this.locationRateLimit.reserveBatch(userId, stale ? 0 : 1, stale ? 1 : 0, receivedAt.getTime());
+            const result = await this.persistLocation(userId, dto, broadcastLocation);
+            return result.location;
+        });
+    }
+    async persistLocation(userId, dto, broadcastLocation = true) {
         const result = await (0, geofence_store_1.saveLocationWithGeofences)(this.prisma, userId, dto);
         const { newLocation, user, trackableMemberships, isStale } = result;
         if (result.duplicate)
-            return newLocation;
+            return { location: newLocation, duplicate: true };
         for (const alert of result.alerts) {
             const metadata = alert.metadata;
             try {
@@ -84,10 +121,10 @@ let LocationsService = class LocationsService {
             });
         }
         if (isStale)
-            return newLocation;
+            return { location: newLocation, duplicate: false };
         await this.notificationsService.resolveActiveAlerts(userId, client_1.AlertType.connection_lost);
         if (dto.batteryLevel !== undefined) {
-            if (dto.batteryLevel <= 15 && !dto.isCharging) {
+            if (dto.batteryLevel <= 15 && dto.isCharging === false) {
                 const alertTitle = 'Dusuk Sarj Uyarisi';
                 const alertMsg = `${user.name} adli aile uyesinin sarji %${dto.batteryLevel} seviyesine dustu!`;
                 await this.notificationsService.raiseUserAlertForFamilies({
@@ -106,13 +143,16 @@ let LocationsService = class LocationsService {
                     dedupeActiveByUser: true,
                 });
             }
-            else if (dto.batteryLevel > 15 || dto.isCharging) {
+            else if (dto.batteryLevel > 15 || dto.isCharging === true) {
                 await this.notificationsService.resolveActiveAlerts(userId, client_1.AlertType.low_battery);
             }
         }
-        return newLocation;
+        return { location: newLocation, duplicate: false };
     }
     async recordBulkLocations(userId, dto) {
+        return this.locationRateLimit.withUserLock(userId, () => this.recordBulkLocationsLocked(userId, dto));
+    }
+    async recordBulkLocationsLocked(userId, dto) {
         const { locations } = dto;
         if (locations && locations.length > record_bulk_locations_dto_1.MAX_BULK_LOCATION_POINTS) {
             throw new common_1.BadRequestException(`Tek bir toplu konum isteği en fazla ${record_bulk_locations_dto_1.MAX_BULK_LOCATION_POINTS} nokta içerebilir.`);
@@ -142,6 +182,7 @@ let LocationsService = class LocationsService {
         const duplicateIds = [];
         const rejectedItems = [];
         let savedLatestLocation = null;
+        const receivedAt = new Date();
         const validLocations = sortedLocations.filter((loc) => {
             if (!loc.devicePointId) {
                 rejectedItems.push({
@@ -150,9 +191,8 @@ let LocationsService = class LocationsService {
                 });
                 return false;
             }
-            const recordedAt = new Date(loc.measuredAt || loc.recordedAt || '');
-            if (!Number.isFinite(recordedAt.getTime()) ||
-                recordedAt.getTime() > Date.now() + 30_000) {
+            const recordedAt = (0, location_freshness_1.canonicalLocationTimestamp)(loc, receivedAt, false);
+            if (!(0, location_freshness_1.isValidLocationTimestamp)(recordedAt, receivedAt)) {
                 rejectedItems.push({
                     devicePointId: loc.devicePointId,
                     reason: 'invalid_measurement_time',
@@ -161,30 +201,64 @@ let LocationsService = class LocationsService {
             }
             return true;
         });
+        const devicePointIds = [
+            ...new Set(validLocations.map((loc) => loc.devicePointId)),
+        ];
+        const existingLocations = devicePointIds.length
+            ? await this.prisma.location.findMany({
+                where: { userId, devicePointId: { in: devicePointIds } },
+            })
+            : [];
+        const existingById = new Map(existingLocations.map((location) => [location.devicePointId, location]));
+        const newCandidates = new Map();
+        for (const location of validLocations) {
+            const id = location.devicePointId;
+            if (!existingById.has(id) && !newCandidates.has(id)) {
+                newCandidates.set(id, location);
+            }
+        }
+        const candidateLocations = [...newCandidates.values()];
+        const liveCount = candidateLocations.filter((location) => !(0, location_freshness_1.isLocationStale)((0, location_freshness_1.canonicalLocationTimestamp)(location, receivedAt, false), receivedAt)).length;
+        const deferredCount = candidateLocations.length - liveCount;
+        await this.locationHardQuota.assertCanCreate(userId, candidateLocations.length, receivedAt);
+        let oversizedLiveRetryAfterSeconds = 300;
+        if (liveCount > location_rate_limit_service_1.LOCATION_RATE_LIMIT.liveCapacity) {
+            const newestLiveAt = Math.max(...candidateLocations
+                .filter((location) => !(0, location_freshness_1.isLocationStale)((0, location_freshness_1.canonicalLocationTimestamp)(location, receivedAt, false), receivedAt))
+                .map((location) => (0, location_freshness_1.canonicalLocationTimestamp)(location, receivedAt, false).getTime()));
+            oversizedLiveRetryAfterSeconds = Math.max(1, Math.ceil((newestLiveAt + location_freshness_1.LOCATION_STALE_AFTER_MS + 1 - receivedAt.getTime()) /
+                1000));
+        }
+        this.locationRateLimit.reserveBatch(userId, liveCount, deferredCount, receivedAt.getTime(), oversizedLiveRetryAfterSeconds);
         for (const loc of validLocations) {
-            const where = {
-                userId_devicePointId: { userId, devicePointId: loc.devicePointId },
-            };
-            const existing = await this.prisma.location.findUnique({ where });
+            const id = loc.devicePointId;
+            const existing = existingById.get(id);
             if (existing) {
-                duplicateIds.push(loc.devicePointId);
+                duplicateIds.push(id);
                 savedLatestLocation = existing;
                 continue;
             }
+            const where = { userId_devicePointId: { userId, devicePointId: id } };
             try {
-                savedLatestLocation = await this.recordLocation(userId, loc, loc === validLocations[validLocations.length - 1]);
-                acceptedIds.push(loc.devicePointId);
+                const persisted = await this.persistLocation(userId, loc, loc === validLocations[validLocations.length - 1]);
+                savedLatestLocation = persisted.location;
+                existingById.set(id, persisted.location);
+                if (persisted.duplicate)
+                    duplicateIds.push(id);
+                else
+                    acceptedIds.push(id);
             }
             catch (error) {
                 const saved = await this.prisma.location.findUnique({ where });
                 if (saved) {
-                    acceptedIds.push(loc.devicePointId);
+                    acceptedIds.push(id);
                     savedLatestLocation = saved;
+                    existingById.set(id, saved);
                 }
                 else {
-                    this.logger.error(`Bulk location failed: ${loc.devicePointId}`, error);
+                    this.logger.error(`Bulk location failed: ${id}`, error);
                     rejectedItems.push({
-                        devicePointId: loc.devicePointId,
+                        devicePointId: id,
                         reason: 'storage_error',
                     });
                     break;
@@ -671,6 +745,8 @@ exports.LocationsService = LocationsService = __decorate([
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
         locations_gateway_1.LocationsGateway,
         notifications_service_1.NotificationsService,
-        subscription_entitlement_service_1.SubscriptionEntitlementService])
+        subscription_entitlement_service_1.SubscriptionEntitlementService,
+        location_rate_limit_service_1.LocationRateLimitService,
+        location_hard_quota_service_1.LocationHardQuotaService])
 ], LocationsService);
 //# sourceMappingURL=locations.service.js.map

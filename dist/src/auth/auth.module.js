@@ -12,6 +12,7 @@ const jwt_1 = require("@nestjs/jwt");
 const config_1 = require("@nestjs/config");
 const passport_1 = require("@nestjs/passport");
 const auth_service_1 = require("./auth.service");
+const login_attempt_service_1 = require("./login-attempt.service");
 const auth_controller_1 = require("./auth.controller");
 const jwt_strategy_1 = require("./strategies/jwt.strategy");
 const users_module_1 = require("../users/users.module");
@@ -38,7 +39,7 @@ exports.AuthModule = AuthModule = __decorate([
             (0, common_1.forwardRef)(() => locations_module_1.LocationsModule),
             mail_module_1.MailModule,
         ],
-        providers: [auth_service_1.AuthService, jwt_strategy_1.JwtStrategy],
+        providers: [auth_service_1.AuthService, jwt_strategy_1.JwtStrategy, login_attempt_service_1.LoginAttemptService],
         controllers: [auth_controller_1.AuthController],
         exports: [auth_service_1.AuthService, passport_1.PassportModule, jwt_1.JwtModule],
     })

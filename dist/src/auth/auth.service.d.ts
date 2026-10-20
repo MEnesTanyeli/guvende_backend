@@ -6,13 +6,15 @@ import { LoginDto } from './dto/login.dto';
 import { UsersService } from '../users/users.service';
 import { MailService } from '../mail/mail.service';
 import { LocationsGateway } from '../locations/locations.gateway';
+import { LoginAttemptService } from './login-attempt.service';
 export declare class AuthService {
     private prisma;
     private jwtService;
     private usersService;
     private mailService;
     private locationsGateway;
-    constructor(prisma: PrismaService, jwtService: JwtService, usersService: UsersService, mailService: MailService, locationsGateway: LocationsGateway);
+    private loginAttemptService;
+    constructor(prisma: PrismaService, jwtService: JwtService, usersService: UsersService, mailService: MailService, locationsGateway: LocationsGateway, loginAttemptService: LoginAttemptService);
     sendVerificationCode(email: string): Promise<{
         success: boolean;
         codeSent: boolean;
@@ -142,16 +144,9 @@ export declare class AuthService {
     private withUserSessionSecurityLock;
     private withRegistrationOtpLock;
     private hashRefreshToken;
+    private forgotPasswordResponse;
     forgotPassword(email: string): Promise<{
         message: string;
-        codeSent?: undefined;
-        expiresAt?: undefined;
-        remainingSeconds?: undefined;
-    } | {
-        message: string;
-        codeSent: boolean;
-        expiresAt: Date;
-        remainingSeconds: number;
     }>;
     resetPassword(dto: {
         email: string;
@@ -161,5 +156,6 @@ export declare class AuthService {
         message: string;
     }>;
     private remainingSeconds;
+    private invalidResetCode;
     private tooManyRequests;
 }

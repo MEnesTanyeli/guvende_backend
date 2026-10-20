@@ -1,4 +1,5 @@
 import { PrismaService } from '../prisma/prisma.service';
+import { Prisma } from '@prisma/client';
 import { SubscriptionEntitlementService } from '../common/subscription-entitlement.service';
 export declare class AlertsService {
     private prisma;
@@ -18,7 +19,7 @@ export declare class AlertsService {
         familyId: string;
         status: import(".prisma/client").$Enums.AlertStatus;
         title: string;
-        metadata: import("@prisma/client/runtime/library").JsonValue | null;
+        metadata: Prisma.JsonValue | null;
         resolvedAt: Date | null;
         audibleWarningId: string | null;
     })[]>;
@@ -31,9 +32,9 @@ export declare class AlertsService {
         familyId: string;
         status: import(".prisma/client").$Enums.AlertStatus;
         title: string;
-        metadata: import("@prisma/client/runtime/library").JsonValue | null;
+        metadata: Prisma.JsonValue | null;
         resolvedAt: Date | null;
         audibleWarningId: string | null;
     }>;
-    resolveAll(userId: string, familyId: string): Promise<import(".prisma/client").Prisma.BatchPayload>;
+    resolveAll(userId: string, familyId: string): Promise<Prisma.BatchPayload>;
 }

@@ -9,19 +9,38 @@ describe('MedicationsService reminder-read authorization', () => {
       user: { findUnique: jest.fn() },
       medicationReminder: { findMany: jest.fn() },
     };
-    const service = new MedicationsService(prisma, {} as any, {} as any);
-    return { prisma, service };
+    const subscriptionEntitlement = {
+      assertFamilyEntitled: jest.fn().mockResolvedValue(undefined),
+    };
+    const familyMembershipLock = {
+      lockFamilyMembership: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new MedicationsService(
+      prisma,
+      {} as any,
+      {} as any,
+      subscriptionEntitlement as any,
+      familyMembershipLock as any,
+    );
+    return { prisma, service, subscriptionEntitlement };
   };
 
   it('allows a user to read their own reminders', async () => {
-    const { prisma, service } = setup();
+    const { prisma, service, subscriptionEntitlement } = setup();
+    prisma.familyMember.findFirst.mockResolvedValue({ familyId: 'family-a' });
     prisma.medicationReminder.findMany.mockResolvedValue([]);
 
     await expect(service.getReminders('child-a', 'child-a')).resolves.toEqual(
       [],
     );
 
-    expect(prisma.familyMember.findFirst).not.toHaveBeenCalled();
+    expect(prisma.familyMember.findFirst).toHaveBeenCalledWith({
+      where: { userId: 'child-a' },
+      select: { familyId: true },
+    });
+    expect(subscriptionEntitlement.assertFamilyEntitled).toHaveBeenCalledWith(
+      'family-a',
+    );
     expect(prisma.medicationReminder.findMany).toHaveBeenCalledWith({
       where: { userId: 'child-a', isActive: true },
       orderBy: { time: 'asc' },
@@ -35,7 +54,10 @@ describe('MedicationsService reminder-read authorization', () => {
     'allows a guardian to read a same-family %s reminders',
     async (_label, targetMemberType) => {
       const { prisma, service } = setup();
-      prisma.familyMember.findFirst.mockResolvedValue({ id: 'membership' });
+      prisma.familyMember.findFirst.mockResolvedValue({
+        id: 'membership',
+        familyId: 'family-a',
+      });
       prisma.medicationReminder.findMany.mockResolvedValue([]);
 
       await expect(
@@ -55,7 +77,7 @@ describe('MedicationsService reminder-read authorization', () => {
             },
           },
         },
-        select: { id: true },
+        select: { id: true, familyId: true },
       });
     },
   );

@@ -2,7 +2,7 @@ import { saveLocationWithGeofences, confirmedZoneName } from './geofence-store';
 import { LocationsService } from './locations.service';
 import { emptyGeofenceMemory } from './geofence-engine';
 
-const startedAt = new Date('2026-09-01T00:00:00Z');
+const startedAt = new Date(Date.now() - 90_000);
 const zone = {
   id: 'zone-a',
   familyId: 'family-a',
@@ -101,6 +101,21 @@ function setup(zones = [zone]) {
       }),
     },
     alert: {
+      findMany: jest.fn(async ({ where, take }: any) =>
+        alerts
+          .filter(
+            (alert) =>
+              alert.userId === where.userId &&
+              alert.familyId === where.familyId &&
+              where.type.in.includes(alert.type) &&
+              alert.metadata?.safeZoneId === where.metadata.equals &&
+              (alert.metadata?.historical == null ||
+                alert.metadata.historical === false) &&
+              alert.createdAt > where.createdAt.gt,
+          )
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+          .slice(0, take),
+      ),
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       create: jest.fn(async ({ data }) => {
         const alert = { id: `alert-${alerts.length}`, ...data };
@@ -118,7 +133,27 @@ function setup(zones = [zone]) {
     resolveActiveAlerts: jest.fn(),
   };
   const gateway: any = { sendLocationUpdate: jest.fn() };
-  const service = () => new LocationsService(prisma, gateway, notifications);
+  const subscriptionEntitlement: any = {
+    assertFamilyEntitled: jest.fn().mockResolvedValue(undefined),
+  };
+  const locationRateLimit: any = {
+    withUserLock: jest.fn(
+      async (_userId: string, operation: () => Promise<unknown>) => operation(),
+    ),
+    reserveBatch: jest.fn(),
+  };
+  const locationHardQuota: any = {
+    assertCanCreate: jest.fn().mockResolvedValue(undefined),
+  };
+  const service = () =>
+    new LocationsService(
+      prisma,
+      gateway,
+      notifications,
+      subscriptionEntitlement,
+      locationRateLimit,
+      locationHardQuota,
+    );
   const seedInside = (id = 'zone-a', userId = 'user') =>
     states.set(`${userId}:${id}`, {
       ...emptyGeofenceMemory(),
@@ -179,7 +214,15 @@ describe('Persistent geofence and location pipeline', () => {
       delayedDelivery: true,
       recordedOffline: true,
     });
-    expect(h.alerts[0].message).toContain('01.09.2026 03:01');
+    const expectedMeasurementTime = new Intl.DateTimeFormat('tr-TR', {
+      timeZone: 'Europe/Istanbul',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(dto(70, 0).measuredAt));
+    expect(h.alerts[0].message).toContain(expectedMeasurementTime);
     expect(h.alerts[0].message).toContain('Çevrimdışı kaydedildi');
     expect(h.notifications.sendFamilyNotification).toHaveBeenCalledWith(
       'family-a',
@@ -262,9 +305,11 @@ describe('Persistent geofence and location pipeline', () => {
   it('processes every bulk point chronologically, including a middle-of-batch exit and re-entry', async () => {
     const h = setup();
     h.seedInside();
-    const points = [40, 55, 70, 80, 90, 100, 30, 30, 30].map((m, i) =>
-      dto(m, i),
-    );
+    const points = [40, 55, 70, 80, 90, 100, 30, 30, 30].map((m, i) => ({
+      ...dto(m, i),
+      deliveryMode: 'deferred' as const,
+      deferredReason: 'server_error',
+    }));
     const result = await h
       .service()
       .recordBulkLocations('user', { locations: [...points].reverse() });
@@ -371,13 +416,13 @@ describe('Persistent geofence and location pipeline', () => {
     const h = setup();
     h.seedInside();
     const instance = h.service();
-    const record = jest
-      .spyOn(instance, 'recordLocation')
+    const persist = jest
+      .spyOn(instance as any, 'persistLocation')
       .mockRejectedValueOnce(new Error('database unavailable'));
     const result = await instance.recordBulkLocations('user', {
       locations: [dto(70, 0), dto(80, 1), dto(90, 2)],
     });
-    expect(record).toHaveBeenCalledTimes(1);
+    expect(persist).toHaveBeenCalledTimes(1);
     expect(result.acceptedIds).toEqual([]);
     expect(result.rejectedItems).toEqual([
       { devicePointId: 'point-0', reason: 'storage_error' },

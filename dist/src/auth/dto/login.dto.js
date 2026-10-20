@@ -10,7 +10,9 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.LoginDto = void 0;
+const class_transformer_1 = require("class-transformer");
 const class_validator_1 = require("class-validator");
+const login_email_1 = require("../login-email");
 class LoginDto {
     email;
     password;
@@ -18,6 +20,7 @@ class LoginDto {
 }
 exports.LoginDto = LoginDto;
 __decorate([
+    (0, class_transformer_1.Transform)(({ value }) => typeof value === 'string' ? (0, login_email_1.normalizeLoginEmail)(value) : value),
     (0, class_validator_1.IsEmail)({}, { message: 'Geçerli bir e-posta adresi giriniz.' }),
     (0, class_validator_1.IsNotEmpty)({ message: 'E-posta alanı boş bırakılamaz.' }),
     __metadata("design:type", String)

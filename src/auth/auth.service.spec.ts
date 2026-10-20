@@ -3,11 +3,14 @@ import {
   HttpException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { createHash } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
 
 describe('AuthService security flows', () => {
   const future = () => new Date(Date.now() + 60_000);
+  const refreshTokenHash = (token: string) =>
+    createHash('sha256').update(token).digest('hex');
 
   function setup() {
     const prisma = {
@@ -15,6 +18,7 @@ describe('AuthService security flows', () => {
       session: {
         create: jest.fn().mockResolvedValue({ id: 's1' }),
         findUnique: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       emailVerification: {
@@ -23,6 +27,7 @@ describe('AuthService security flows', () => {
         update: jest.fn(),
         delete: jest.fn().mockResolvedValue(undefined),
       },
+      $executeRaw: jest.fn().mockResolvedValue(1),
       $transaction: jest.fn(),
     };
     prisma.$transaction.mockImplementation((callback: any) => callback(prisma));
@@ -34,12 +39,23 @@ describe('AuthService security flows', () => {
       sendVerificationCodeEmail: jest.fn().mockResolvedValue(undefined),
       sendResetPasswordEmail: jest.fn().mockResolvedValue(undefined),
     };
+    const locationsGateway = {
+      disconnectSessions: jest.fn(),
+      disconnectUser: jest.fn(),
+    };
+    const loginAttemptService = {
+      reserve: jest.fn(() => ({ accountKey: 'test', id: Symbol('attempt') })),
+      commitFailure: jest.fn(),
+      release: jest.fn(),
+    };
     return {
       service: new AuthService(
         prisma as any,
         jwt as any,
         users as any,
         mail as any,
+        locationsGateway as any,
+        loginAttemptService as any,
       ),
       prisma,
       jwt,
@@ -168,7 +184,9 @@ describe('AuthService security flows', () => {
     const { service, prisma, mail } = setup();
     prisma.user.findUnique.mockResolvedValue(null);
     const result = await service.forgotPassword('missing@example.com');
-    expect(result.message).toContain('kayıtlıysa');
+    expect(result.message).toBe(
+      'Eğer bu e-posta adresiyle kayıtlı bir hesap varsa, şifre sıfırlama talimatları gönderilecektir.',
+    );
     expect(mail.sendResetPasswordEmail).not.toHaveBeenCalled();
   });
 
@@ -254,6 +272,7 @@ describe('AuthService security flows', () => {
     prisma.session.findUnique.mockResolvedValue({
       id: 'old-session',
       userId: 'u1',
+      refreshTokenHash: refreshTokenHash('old-refresh-token'),
       tokenFamilyId: 'family-phone-1',
       deviceId: 'phone-1',
       revokedAt: null,
@@ -291,6 +310,7 @@ describe('AuthService security flows', () => {
     prisma.session.findUnique.mockResolvedValue({
       id: 'old-session',
       userId: 'u1',
+      refreshTokenHash: refreshTokenHash('stolen-old-token'),
       tokenFamilyId: 'family-phone-1',
       revokedAt: new Date(),
       replacedByTokenHash: 'next-token-hash',
@@ -317,6 +337,7 @@ describe('AuthService security flows', () => {
     prisma.session.findUnique.mockResolvedValue({
       id: 'old-session',
       userId: 'u1',
+      refreshTokenHash: refreshTokenHash('stolen-old-token'),
       tokenFamilyId: 'family-phone-1',
       revokedAt: new Date(Date.now() - 10_000),
       replacedByTokenHash: 'next-token-hash',
@@ -362,10 +383,23 @@ describe('AuthService security flows', () => {
 
   it('can revoke the current session or all sessions', async () => {
     const { service, prisma } = setup();
+    prisma.user.findUnique.mockResolvedValue({ role: 'guardian' });
+    prisma.session.findUnique.mockResolvedValue({
+      id: 's1',
+      userId: 'u1',
+      tokenFamilyId: 'family-phone-1',
+      revokedAt: null,
+      user: { role: 'guardian' },
+    });
+    prisma.session.findMany.mockResolvedValue([{ id: 's1' }]);
     await service.logout('s1');
     expect(prisma.session.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 's1', revokedAt: null },
+        where: {
+          userId: 'u1',
+          tokenFamilyId: 'family-phone-1',
+          revokedAt: null,
+        },
       }),
     );
 

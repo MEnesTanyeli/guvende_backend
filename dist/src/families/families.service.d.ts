@@ -5,18 +5,18 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { LocationsGateway } from '../locations/locations.gateway';
 import { OfflineSosService } from '../offline-sos/offline-sos.service';
 import { SubscriptionEntitlementService } from '../common/subscription-entitlement.service';
+import { FamilyMembershipLockService } from '../common/family-membership-lock.service';
 export declare class FamiliesService {
     private prisma;
     private notificationsService;
     private locationsGateway;
     private offlineSosService;
     private subscriptionEntitlement;
+    private familyMembershipLock;
     private readonly inviteCodeAlphabet;
-    constructor(prisma: PrismaService, notificationsService: NotificationsService, locationsGateway: LocationsGateway, offlineSosService: OfflineSosService, subscriptionEntitlement: SubscriptionEntitlementService);
+    constructor(prisma: PrismaService, notificationsService: NotificationsService, locationsGateway: LocationsGateway, offlineSosService: OfflineSosService, subscriptionEntitlement: SubscriptionEntitlementService, familyMembershipLock?: FamilyMembershipLockService);
     private createInviteCode;
     private createSosEncryptionKey;
-    private lockUserMembership;
-    private lockFamilyMembership;
     private dissolveOwnedFamily;
     private generateUniqueInviteCode;
     private isInviteCodeUniqueCollision;
@@ -82,6 +82,16 @@ export declare class FamiliesService {
         refreshAfter: string;
     }>;
     findOne(userId: string, familyId: string): Promise<{
+        safeZones: {
+            id: string;
+            name: string;
+            createdAt: Date;
+            latitude: number;
+            longitude: number;
+            familyId: string;
+            radius: number;
+            createdBy: string;
+        }[];
         members: {
             guardianTrackingEnabled?: boolean | undefined;
             muteNotifications?: boolean | undefined;
@@ -103,16 +113,6 @@ export declare class FamiliesService {
             id: string;
             name: string;
         };
-        safeZones: {
-            id: string;
-            name: string;
-            createdAt: Date;
-            latitude: number;
-            longitude: number;
-            familyId: string;
-            radius: number;
-            createdBy: string;
-        }[];
     }>;
     invite(userId: string, familyId: string): Promise<{
         familyId: string;

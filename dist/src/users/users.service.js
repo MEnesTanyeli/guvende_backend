@@ -49,14 +49,17 @@ const client_1 = require("@prisma/client");
 const prisma_service_1 = require("../prisma/prisma.service");
 const locations_gateway_1 = require("../locations/locations.gateway");
 const offline_sos_service_1 = require("../offline-sos/offline-sos.service");
+const family_membership_lock_service_1 = require("../common/family-membership-lock.service");
 let UsersService = class UsersService {
     prisma;
     locationsGateway;
     offlineSosService;
-    constructor(prisma, locationsGateway, offlineSosService) {
+    familyMembershipLock;
+    constructor(prisma, locationsGateway, offlineSosService, familyMembershipLock = new family_membership_lock_service_1.FamilyMembershipLockService()) {
         this.prisma = prisma;
         this.locationsGateway = locationsGateway;
         this.offlineSosService = offlineSosService;
+        this.familyMembershipLock = familyMembershipLock;
     }
     async lockProxyMutation(tx, ownerUserId) {
         await tx.$executeRaw `SELECT pg_advisory_xact_lock(hashtextextended(${`proxy-mutation:${ownerUserId}`}, 0))`;
@@ -84,6 +87,8 @@ let UsersService = class UsersService {
     async deleteAccount(userId, password) {
         const familyIds = await this.prisma
             .$transaction(async (tx) => {
+            await this.lockProxyMutation(tx, userId);
+            await this.familyMembershipLock.lockUserMembership(tx, userId);
             await tx.$queryRaw `SELECT id FROM users WHERE id = ${userId} FOR UPDATE`;
             const user = await tx.user.findUnique({
                 where: { id: userId },
@@ -96,6 +101,19 @@ let UsersService = class UsersService {
                 where: { ownerId: userId },
                 select: { id: true },
             });
+            const memberships = await tx.familyMember.findMany({
+                where: { userId },
+                select: { familyId: true },
+            });
+            const affectedFamilyIds = [
+                ...new Set([
+                    ...families.map((family) => family.id),
+                    ...memberships.map((membership) => membership.familyId),
+                ]),
+            ].sort();
+            for (const familyId of affectedFamilyIds) {
+                await this.familyMembershipLock.lockFamilyMembership(tx, familyId);
+            }
             await tx.user.delete({ where: { id: userId } });
             return families.map((family) => family.id);
         })
@@ -309,7 +327,8 @@ let UsersService = class UsersService {
                 where: { ownerId: userId },
                 select: { id: true },
             });
-            for (const family of ownerFamilies) {
+            for (const family of ownerFamilies.sort((a, b) => a.id.localeCompare(b.id))) {
+                await this.familyMembershipLock.lockFamilyMembership(tx, family.id);
                 const deleted = await tx.familyMember.deleteMany({
                     where: {
                         familyId: family.id,
@@ -421,6 +440,7 @@ exports.UsersService = UsersService = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
         locations_gateway_1.LocationsGateway,
-        offline_sos_service_1.OfflineSosService])
+        offline_sos_service_1.OfflineSosService,
+        family_membership_lock_service_1.FamilyMembershipLockService])
 ], UsersService);
 //# sourceMappingURL=users.service.js.map

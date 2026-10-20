@@ -6,12 +6,14 @@ import { MailService } from './mail.service';
 describe('External service failure handling', () => {
   afterEach(() => jest.restoreAllMocks());
 
-  it('does not call Brevo when the API key is missing', async () => {
+  it('rejects before calling Brevo when the API key is missing', async () => {
     const fetchMock = jest.spyOn(global, 'fetch');
     const service = new MailService({
       get: jest.fn().mockReturnValue(undefined),
     } as unknown as ConfigService);
-    await service.sendVerificationCodeEmail('user@example.com', '123456');
+    await expect(
+      service.sendVerificationCodeEmail('user@example.com', '123456'),
+    ).rejects.toThrow('BREVO_API_KEY tanimli degil.');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

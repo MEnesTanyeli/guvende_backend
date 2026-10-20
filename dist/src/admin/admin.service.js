@@ -15,14 +15,17 @@ const client_1 = require("@prisma/client");
 const prisma_service_1 = require("../prisma/prisma.service");
 const notifications_service_1 = require("../notifications/notifications.service");
 const locations_gateway_1 = require("../locations/locations.gateway");
+const family_membership_lock_service_1 = require("../common/family-membership-lock.service");
 let AdminService = class AdminService {
     prisma;
     notificationsService;
     locationsGateway;
-    constructor(prisma, notificationsService, locationsGateway) {
+    familyMembershipLock;
+    constructor(prisma, notificationsService, locationsGateway, familyMembershipLock = new family_membership_lock_service_1.FamilyMembershipLockService()) {
         this.prisma = prisma;
         this.notificationsService = notificationsService;
         this.locationsGateway = locationsGateway;
+        this.familyMembershipLock = familyMembershipLock;
     }
     async dashboard() {
         const now = new Date();
@@ -293,15 +296,36 @@ let AdminService = class AdminService {
     async deleteUser(adminId, userId) {
         if (adminId === userId)
             throw new common_1.BadRequestException('Kendi yönetici hesabınızı silemezsiniz.');
-        const user = await this.prisma.user.findUnique({
-            where: { id: userId },
-            select: { id: true, name: true, email: true, role: true },
+        const user = await this.prisma.$transaction(async (tx) => {
+            await this.familyMembershipLock.lockUserMembership(tx, userId);
+            const user = await tx.user.findUnique({
+                where: { id: userId },
+                select: { id: true, name: true, email: true, role: true },
+            });
+            if (!user)
+                throw new common_1.NotFoundException('Kullanıcı bulunamadı.');
+            if (user.role === 'admin')
+                throw new common_1.BadRequestException('Yönetici hesaplarını bu panelden silemezsiniz.');
+            const families = await tx.family.findMany({
+                where: { ownerId: userId },
+                select: { id: true },
+            });
+            const memberships = await tx.familyMember.findMany({
+                where: { userId },
+                select: { familyId: true },
+            });
+            const affectedFamilyIds = [
+                ...new Set([
+                    ...families.map((family) => family.id),
+                    ...memberships.map((membership) => membership.familyId),
+                ]),
+            ].sort();
+            for (const familyId of affectedFamilyIds) {
+                await this.familyMembershipLock.lockFamilyMembership(tx, familyId);
+            }
+            await tx.user.delete({ where: { id: userId } });
+            return user;
         });
-        if (!user)
-            throw new common_1.NotFoundException('Kullanıcı bulunamadı.');
-        if (user.role === 'admin')
-            throw new common_1.BadRequestException('Yönetici hesaplarını bu panelden silemezsiniz.');
-        await this.prisma.user.delete({ where: { id: userId } });
         this.locationsGateway.disconnectUser(userId);
         await this.logAction(adminId, 'USER_DELETE', userId, {
             name: user.name,
@@ -569,6 +593,7 @@ exports.AdminService = AdminService = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
         notifications_service_1.NotificationsService,
-        locations_gateway_1.LocationsGateway])
+        locations_gateway_1.LocationsGateway,
+        family_membership_lock_service_1.FamilyMembershipLockService])
 ], AdminService);
 //# sourceMappingURL=admin.service.js.map

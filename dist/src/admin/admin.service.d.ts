@@ -4,11 +4,13 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { AdminQueryDto, AlertQueryDto, UserQueryDto } from './dto/admin-query.dto';
 import { UpdateAdminUserDto } from './dto/update-user.dto';
 import { LocationsGateway } from '../locations/locations.gateway';
+import { FamilyMembershipLockService } from '../common/family-membership-lock.service';
 export declare class AdminService {
     private readonly prisma;
     private readonly notificationsService;
     private readonly locationsGateway;
-    constructor(prisma: PrismaService, notificationsService: NotificationsService, locationsGateway: LocationsGateway);
+    private readonly familyMembershipLock;
+    constructor(prisma: PrismaService, notificationsService: NotificationsService, locationsGateway: LocationsGateway, familyMembershipLock?: FamilyMembershipLockService);
     dashboard(): Promise<{
         totals: {
             users: number;

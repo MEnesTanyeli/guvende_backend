@@ -14,42 +14,47 @@ const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
 const client_1 = require("@prisma/client");
 const subscription_entitlement_service_1 = require("../common/subscription-entitlement.service");
+const family_membership_lock_service_1 = require("../common/family-membership-lock.service");
 let SafeZonesService = class SafeZonesService {
     prisma;
     subscriptionEntitlement;
-    constructor(prisma, subscriptionEntitlement) {
+    familyMembershipLock;
+    constructor(prisma, subscriptionEntitlement, familyMembershipLock = new family_membership_lock_service_1.FamilyMembershipLockService()) {
         this.prisma = prisma;
         this.subscriptionEntitlement = subscriptionEntitlement;
+        this.familyMembershipLock = familyMembershipLock;
     }
     async create(userId, familyId, dto) {
-        await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
-        const membership = await this.prisma.familyMember.findUnique({
-            where: {
-                familyId_userId: {
-                    familyId,
-                    userId,
+        return this.prisma.$transaction(async (tx) => {
+            await this.familyMembershipLock.lockFamilyMembership(tx, familyId);
+            const membership = await tx.familyMember.findUnique({
+                where: {
+                    familyId_userId: {
+                        familyId,
+                        userId,
+                    },
                 },
-            },
-        });
-        if (!membership) {
-            throw new common_1.ForbiddenException('Bu aile grubuna erişim yetkiniz yok.');
-        }
-        if (membership.memberType !== client_1.MemberType.guardian) {
-            throw new common_1.ForbiddenException('Güvenli bölge eklemek için koruyucu (guardian) olmalısınız.');
-        }
-        return this.prisma.safeZone.create({
-            data: {
-                familyId,
-                name: dto.name,
-                latitude: dto.latitude,
-                longitude: dto.longitude,
-                radius: dto.radius,
-                createdBy: userId,
-            },
+            });
+            if (!membership) {
+                throw new common_1.ForbiddenException('Bu aile grubuna erişim yetkiniz yok.');
+            }
+            if (membership.memberType !== client_1.MemberType.guardian) {
+                throw new common_1.ForbiddenException('Güvenli bölge eklemek için koruyucu (guardian) olmalısınız.');
+            }
+            await this.subscriptionEntitlement.assertFamilyEntitled(familyId, tx);
+            return tx.safeZone.create({
+                data: {
+                    familyId,
+                    name: dto.name,
+                    latitude: dto.latitude,
+                    longitude: dto.longitude,
+                    radius: dto.radius,
+                    createdBy: userId,
+                },
+            });
         });
     }
     async findAll(userId, familyId) {
-        await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
         const membership = await this.prisma.familyMember.findUnique({
             where: {
                 familyId_userId: {
@@ -64,9 +69,15 @@ let SafeZonesService = class SafeZonesService {
         if (membership.memberType !== client_1.MemberType.guardian) {
             throw new common_1.ForbiddenException('Guvenli bolgeleri sadece koruyucu (guardian) uyeler goruntuleyebilir.');
         }
+        await this.subscriptionEntitlement.assertFamilyEntitled(familyId);
         return this.prisma.safeZone.findMany({
             where: {
                 familyId,
+                family: {
+                    members: {
+                        some: { userId, memberType: client_1.MemberType.guardian },
+                    },
+                },
             },
             orderBy: {
                 createdAt: 'desc',
@@ -74,27 +85,30 @@ let SafeZonesService = class SafeZonesService {
         });
     }
     async remove(userId, safeZoneId) {
-        const safeZone = await this.prisma.safeZone.findUnique({
-            where: { id: safeZoneId },
+        const guardianFamilyScope = {
+            members: {
+                some: { userId, memberType: client_1.MemberType.guardian },
+            },
+        };
+        const safeZone = await this.prisma.safeZone.findFirst({
+            where: {
+                id: safeZoneId,
+                family: { is: guardianFamilyScope },
+            },
         });
         if (!safeZone) {
             throw new common_1.NotFoundException('Güvenli bölge bulunamadı.');
         }
         await this.subscriptionEntitlement.assertFamilyEntitled(safeZone.familyId);
-        const membership = await this.prisma.familyMember.findUnique({
+        const deleted = await this.prisma.safeZone.deleteMany({
             where: {
-                familyId_userId: {
-                    familyId: safeZone.familyId,
-                    userId,
-                },
+                id: safeZoneId,
+                family: { is: guardianFamilyScope },
             },
         });
-        if (!membership || membership.memberType !== client_1.MemberType.guardian) {
-            throw new common_1.ForbiddenException('Bu güvenli bölgeyi silmek için yetkiniz yok.');
+        if (deleted.count === 0) {
+            throw new common_1.NotFoundException('Güvenli bölge bulunamadı.');
         }
-        await this.prisma.safeZone.delete({
-            where: { id: safeZoneId },
-        });
         return { message: 'Güvenli bölge başarıyla silindi.' };
     }
 };
@@ -102,6 +116,7 @@ exports.SafeZonesService = SafeZonesService;
 exports.SafeZonesService = SafeZonesService = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
-        subscription_entitlement_service_1.SubscriptionEntitlementService])
+        subscription_entitlement_service_1.SubscriptionEntitlementService,
+        family_membership_lock_service_1.FamilyMembershipLockService])
 ], SafeZonesService);
 //# sourceMappingURL=safe-zones.service.js.map

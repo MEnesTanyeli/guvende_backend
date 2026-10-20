@@ -29,7 +29,20 @@ describe('tracking data authorization', () => {
       where: expect.objectContaining({
         userId: 'target',
         memberType: { in: ['child', 'elder'] },
-        family: { members: { some: { userId: 'guardian', memberType: 'guardian' } } },
+        family: expect.objectContaining({
+          owner: {
+            OR: [
+              { trialEndsAt: { gt: expect.any(Date) } },
+              {
+                isPremium: true,
+                premiumExpiresAt: { gt: expect.any(Date) },
+              },
+            ],
+          },
+          members: {
+            some: { userId: 'guardian', memberType: 'guardian' },
+          },
+        }),
       }),
       select: { id: true },
     });

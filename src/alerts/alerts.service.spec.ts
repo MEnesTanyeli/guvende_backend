@@ -8,14 +8,27 @@ describe('AlertsService response authorization', () => {
       familyMember: { findUnique: jest.fn().mockResolvedValue(membership) },
       alert: { findMany: jest.fn().mockResolvedValue([]) },
     };
-    return { prisma, service: new AlertsService(prisma) };
+    const subscriptionEntitlement = {
+      assertFamilyEntitled: jest.fn().mockResolvedValue(undefined),
+    };
+    return {
+      prisma,
+      service: new AlertsService(prisma, subscriptionEntitlement as any),
+    };
   };
 
   it('returns only the user id and name projection to a family guardian', async () => {
     const { prisma, service } = setup({ memberType: MemberType.guardian });
     await service.findAll('guardian', 'family-a');
     expect(prisma.alert.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { familyId: 'family-a' },
+      where: {
+        familyId: 'family-a',
+        family: {
+          members: {
+            some: { userId: 'guardian', memberType: MemberType.guardian },
+          },
+        },
+      },
       include: { user: { select: { id: true, name: true } } },
     }));
   });

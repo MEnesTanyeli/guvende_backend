@@ -5,22 +5,20 @@ import { LocationsGateway } from './locations.gateway';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AckAudibleWarningDto } from './dto/ack-audible-warning.dto';
 import { SubscriptionEntitlementService } from '../common/subscription-entitlement.service';
+import { LocationRateLimitService } from './location-rate-limit.service';
+import { LocationHardQuotaService } from './location-hard-quota.service';
 export declare class LocationsService {
     private prisma;
     private locationsGateway;
     private notificationsService;
     private subscriptionEntitlement;
+    private locationRateLimit;
+    private locationHardQuota;
     private readonly logger;
-    constructor(prisma: PrismaService, locationsGateway: LocationsGateway, notificationsService: NotificationsService, subscriptionEntitlement: SubscriptionEntitlementService);
+    constructor(prisma: PrismaService, locationsGateway: LocationsGateway, notificationsService: NotificationsService, subscriptionEntitlement: SubscriptionEntitlementService, locationRateLimit: LocationRateLimitService, locationHardQuota: LocationHardQuotaService);
     private getIstanbulDateKey;
     private getIstanbulDayRangeUtc;
     recordLocation(userId: string, dto: RecordLocationDto, broadcastLocation?: boolean): Promise<{
-        user: {
-            id: string;
-            email: string;
-            name: string;
-        };
-    } & {
         id: string;
         userId: string;
         latitude: number;
@@ -38,6 +36,7 @@ export declare class LocationsService {
         deliveryMode: string;
         deferredReason: string | null;
     }>;
+    private persistLocation;
     recordBulkLocations(userId: string, dto: RecordBulkLocationsDto): Promise<{
         success: boolean;
         count: number;
@@ -73,6 +72,7 @@ export declare class LocationsService {
             deferredReason: string | null;
         } | null;
     }>;
+    private recordBulkLocationsLocked;
     getLatestLocations(userId: string, familyId: string): Promise<{
         insideZoneName: string | null;
         user: {

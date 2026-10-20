@@ -21,7 +21,6 @@ const families_module_1 = require("./families/families.module");
 const locations_module_1 = require("./locations/locations.module");
 const safe_zones_module_1 = require("./safe-zones/safe-zones.module");
 const notifications_module_1 = require("./notifications/notifications.module");
-const battery_module_1 = require("./battery/battery.module");
 const alerts_module_1 = require("./alerts/alerts.module");
 const sos_module_1 = require("./sos/sos.module");
 const activity_module_1 = require("./activity/activity.module");
@@ -50,7 +49,6 @@ exports.AppModule = AppModule = __decorate([
             locations_module_1.LocationsModule,
             safe_zones_module_1.SafeZonesModule,
             notifications_module_1.NotificationsModule,
-            battery_module_1.BatteryModule,
             alerts_module_1.AlertsModule,
             sos_module_1.SosModule,
             activity_module_1.ActivityModule,

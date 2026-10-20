@@ -1,10 +1,12 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSafeZoneDto } from './dto/create-safe-zone.dto';
 import { SubscriptionEntitlementService } from '../common/subscription-entitlement.service';
+import { FamilyMembershipLockService } from '../common/family-membership-lock.service';
 export declare class SafeZonesService {
     private prisma;
     private subscriptionEntitlement;
-    constructor(prisma: PrismaService, subscriptionEntitlement: SubscriptionEntitlementService);
+    private familyMembershipLock;
+    constructor(prisma: PrismaService, subscriptionEntitlement: SubscriptionEntitlementService, familyMembershipLock?: FamilyMembershipLockService);
     create(userId: string, familyId: string, dto: CreateSafeZoneDto): Promise<{
         id: string;
         name: string;

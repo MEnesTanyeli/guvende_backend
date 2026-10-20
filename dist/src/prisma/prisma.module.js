@@ -10,14 +10,23 @@ exports.PrismaModule = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("./prisma.service");
 const subscription_entitlement_service_1 = require("../common/subscription-entitlement.service");
+const family_membership_lock_service_1 = require("../common/family-membership-lock.service");
 let PrismaModule = class PrismaModule {
 };
 exports.PrismaModule = PrismaModule;
 exports.PrismaModule = PrismaModule = __decorate([
     (0, common_1.Global)(),
     (0, common_1.Module)({
-        providers: [prisma_service_1.PrismaService, subscription_entitlement_service_1.SubscriptionEntitlementService],
-        exports: [prisma_service_1.PrismaService, subscription_entitlement_service_1.SubscriptionEntitlementService],
+        providers: [
+            prisma_service_1.PrismaService,
+            subscription_entitlement_service_1.SubscriptionEntitlementService,
+            family_membership_lock_service_1.FamilyMembershipLockService,
+        ],
+        exports: [
+            prisma_service_1.PrismaService,
+            subscription_entitlement_service_1.SubscriptionEntitlementService,
+            family_membership_lock_service_1.FamilyMembershipLockService,
+        ],
     })
 ], PrismaModule);
 //# sourceMappingURL=prisma.module.js.map

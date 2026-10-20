@@ -51,6 +51,16 @@ export declare class FamiliesController {
         guardianTrackingEnabled: boolean;
     }>;
     findOne(userId: string, id: string): Promise<{
+        safeZones: {
+            id: string;
+            name: string;
+            createdAt: Date;
+            latitude: number;
+            longitude: number;
+            familyId: string;
+            radius: number;
+            createdBy: string;
+        }[];
         members: {
             guardianTrackingEnabled?: boolean | undefined;
             muteNotifications?: boolean | undefined;
@@ -72,16 +82,6 @@ export declare class FamiliesController {
             id: string;
             name: string;
         };
-        safeZones: {
-            id: string;
-            name: string;
-            createdAt: Date;
-            latitude: number;
-            longitude: number;
-            familyId: string;
-            radius: number;
-            createdBy: string;
-        }[];
     }>;
     invite(userId: string, id: string): Promise<{
         familyId: string;

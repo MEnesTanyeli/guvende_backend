@@ -22,21 +22,16 @@ const send_audible_warning_dto_1 = require("./dto/send-audible-warning.dto");
 const jwt_auth_guard_1 = require("../auth/guards/jwt-auth.guard");
 const subscription_guard_1 = require("../auth/guards/subscription.guard");
 const get_user_decorator_1 = require("../auth/decorators/get-user.decorator");
-const location_rate_limit_service_1 = require("./location-rate-limit.service");
 const location_rate_limit_filter_1 = require("./location-rate-limit.filter");
 let LocationsController = class LocationsController {
     locationsService;
-    locationRateLimit;
-    constructor(locationsService, locationRateLimit) {
+    constructor(locationsService) {
         this.locationsService = locationsService;
-        this.locationRateLimit = locationRateLimit;
     }
     async recordLocation(userId, dto) {
-        this.locationRateLimit.reserve(userId, 1);
         return this.locationsService.recordLocation(userId, dto);
     }
     async recordBulkLocations(userId, dto) {
-        this.locationRateLimit.reserve(userId, dto.locations.length);
         return this.locationsService.recordBulkLocations(userId, dto);
     }
     async getLatestLocations(userId, familyId) {
@@ -107,7 +102,6 @@ exports.LocationsController = LocationsController = __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard, subscription_guard_1.SubscriptionGuard),
     (0, common_1.UseFilters)(location_rate_limit_filter_1.LocationRateLimitFilter),
     (0, common_1.Controller)(),
-    __metadata("design:paramtypes", [locations_service_1.LocationsService,
-        location_rate_limit_service_1.LocationRateLimitService])
+    __metadata("design:paramtypes", [locations_service_1.LocationsService])
 ], LocationsController);
 //# sourceMappingURL=locations.controller.js.map

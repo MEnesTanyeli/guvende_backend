@@ -3,18 +3,10 @@ import { RecordLocationDto } from './dto/record-location.dto';
 import { RecordBulkLocationsDto } from './dto/record-bulk-locations.dto';
 import { AckAudibleWarningDto } from './dto/ack-audible-warning.dto';
 import { SendAudibleWarningDto } from './dto/send-audible-warning.dto';
-import { LocationRateLimitService } from './location-rate-limit.service';
 export declare class LocationsController {
     private locationsService;
-    private locationRateLimit;
-    constructor(locationsService: LocationsService, locationRateLimit: LocationRateLimitService);
+    constructor(locationsService: LocationsService);
     recordLocation(userId: string, dto: RecordLocationDto): Promise<{
-        user: {
-            id: string;
-            email: string;
-            name: string;
-        };
-    } & {
         id: string;
         userId: string;
         latitude: number;
